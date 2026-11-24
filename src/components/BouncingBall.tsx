@@ -23,6 +23,7 @@ interface WordPoint {
   x: number;
   y: number;
   el: HTMLElement;
+  lastFill: number;
 }
 
 export function BouncingBall({
@@ -51,6 +52,7 @@ export function BouncingBall({
           x: node.offsetLeft + node.offsetWidth / 2,
           y: node.offsetTop + topOffset,
           el: node,
+          lastFill: -1,
         });
       });
       pointsRef.current = pts;
@@ -93,11 +95,14 @@ export function BouncingBall({
       const next = Math.min(count - 1, i + 1);
       const f = wordFloat - i;
 
-      // Drive 60 FPS Apple Music Sing-style liquid fill (--word-fill) on each word
+      // Drive 60+ FPS liquid fill (--word-fill) only when percentage actually changes
       const activeFill = i === count - 1 ? Math.min(1, rawFloat - i) : f;
       for (let k = 0; k < count; k++) {
         const fillPct = k < i ? 100 : k > i ? 0 : Math.round(activeFill * 100);
-        pts[k].el.style.setProperty('--word-fill', `${fillPct}%`);
+        if (pts[k].lastFill !== fillPct) {
+          pts[k].lastFill = fillPct;
+          pts[k].el.style.setProperty('--word-fill', `${fillPct}%`);
+        }
       }
 
       const el = ballRef.current;

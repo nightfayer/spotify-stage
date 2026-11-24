@@ -24,24 +24,34 @@ export function parseLrc(lrcText: string): LyricLine[] {
   return lines.sort((a, b) => a.timeMs - b.timeMs);
 }
 
+const lyricsCache = new Map<string, LyricLine[]>();
+
 export async function fetchSyncedLyrics(
   artist: string,
   title: string,
-  durationMs: number
+  durationMs: number,
+  signal?: AbortSignal
 ): Promise<LyricLine[]> {
+  const cleanArtist = artist.split(',')[0].trim();
+  const durationSec = Math.round(durationMs / 1000);
+  const cacheKey = `${cleanArtist.toLowerCase()}::${title.toLowerCase()}::${durationSec}`;
+  const cached = lyricsCache.get(cacheKey);
+  if (cached) return cached;
+
   try {
     const params = new URLSearchParams({
-      artist_name: artist.split(',')[0].trim(),
+      artist_name: cleanArtist,
       track_name: title,
-      duration: String(Math.round(durationMs / 1000)),
+      duration: String(durationSec),
     });
 
-    const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+    const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { signal });
     if (!res.ok) return [];
 
     const data = await res.json();
-    if (!data?.syncedLyrics) return [];
-    return parseLrc(data.syncedLyrics);
+    const parsed = data?.syncedLyrics ? parseLrc(data.syncedLyrics) : [];
+    lyricsCache.set(cacheKey, parsed);
+    return parsed;
   } catch {
     return [];
   }
@@ -64,12 +74,17 @@ export function getActiveLyricState(
 ): ActiveLyricState | null {
   if (lines.length === 0) return null;
 
+  // Binary search for the latest line with timeMs <= progressMs
+  let lo = 0;
+  let hi = lines.length - 1;
   let activeIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].timeMs <= progressMs) {
-      activeIdx = i;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].timeMs <= progressMs) {
+      activeIdx = mid;
+      lo = mid + 1;
     } else {
-      break;
+      hi = mid - 1;
     }
   }
 

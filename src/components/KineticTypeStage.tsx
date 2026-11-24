@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActiveLyricState } from '../lib/lyrics';
 import type { FontStyleMode, TrackState } from '../types';
 import { BouncingBall, type PlaybackClock } from './BouncingBall';
@@ -51,7 +51,7 @@ function pickHeroWordIndex(words: string[]): number {
   return bestIdx;
 }
 
-export function KineticTypeStage({
+export const KineticTypeStage = memo(function KineticTypeStage({
   track,
   activeLyric,
   beatRef,
@@ -60,6 +60,26 @@ export function KineticTypeStage({
   fontStyle,
 }: KineticTypeStageProps) {
   const wordsContainerRef = useRef<HTMLDivElement | null>(null);
+  const topProgressFillRef = useRef<HTMLDivElement | null>(null);
+
+  // Smooth 60+ FPS GPU-composited top progress bar driven directly from clockRef (zero React re-renders)
+  useEffect(() => {
+    let rafId = 0;
+    const duration = Math.max(1, track.durationMs);
+    const tick = () => {
+      rafId = requestAnimationFrame(tick);
+      const fill = topProgressFillRef.current;
+      if (!fill) return;
+      const clock = clockRef.current;
+      const liveMs = clock.isPlaying
+        ? clock.progressMs + (performance.now() - clock.updatedAt)
+        : clock.progressMs;
+      const ratio = Math.min(1, Math.max(0, liveMs / duration));
+      fill.style.transform = `scaleX(${ratio.toFixed(4)})`;
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [clockRef, track.durationMs]);
 
   const currentShot = useMemo<ShotSnapshot>(() => {
     const words =
@@ -99,7 +119,6 @@ export function KineticTypeStage({
   }, [currentShot]);
 
   const activeWordIdx = activeLyric ? activeLyric.activeWordIndex : currentShot.words.length - 1;
-  const progressPct = Math.min(100, (track.progressMs / Math.max(1, track.durationMs)) * 100);
 
   return (
     <div
@@ -125,7 +144,7 @@ export function KineticTypeStage({
 
       {/* Razor-thin editorial top progress hairline */}
       <div className="reels-top-progress" aria-hidden="true">
-        <div className="reels-top-progress-fill" style={{ width: `${progressPct}%` }} />
+        <div ref={topProgressFillRef} className="reels-top-progress-fill" />
       </div>
 
       {/* Giant outlined ghost watermark tinted by cover primary color */}
@@ -215,4 +234,4 @@ export function KineticTypeStage({
       </div>
     </div>
   );
-}
+});

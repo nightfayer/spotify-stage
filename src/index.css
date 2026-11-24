@@ -62,7 +62,8 @@ body,
   background-position: center;
   filter: blur(64px) saturate(1.55) brightness(0.42);
   transform: scale(calc(1.12 + var(--beat, 0) * 0.05));
-  transition: background-image 0.8s ease, transform 0.12s linear;
+  transition: background-image 0.5s ease;
+  will-change: transform;
   opacity: 0.78;
   z-index: -1;
 }
@@ -78,10 +79,13 @@ body,
 }
 
 .reels-top-progress-fill {
+  width: 100%;
   height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
   background: linear-gradient(90deg, var(--reel-primary), var(--reel-accent));
   box-shadow: 0 0 calc(6px + var(--beat, 0) * 18px) var(--reel-accent);
-  transition: width 0.12s linear;
 }
 
 .reels-ghost-word {
@@ -1120,21 +1124,23 @@ body,
 .mini-eq i {
   display: block;
   width: 2px;
+  height: 10px;
   border-radius: 1px;
-  transition: height 0.06s linear;
+  transform-origin: bottom center;
+  will-change: transform;
 }
 
 .mini-eq .eq-b1 {
-  height: calc(2px + var(--bass, 0.2) * 8px);
+  transform: scaleY(calc(0.2 + var(--bass, 0.2) * 0.8));
 }
 .mini-eq .eq-b2 {
-  height: calc(2px + var(--beat, 0.2) * 8px);
+  transform: scaleY(calc(0.2 + var(--beat, 0.2) * 0.8));
 }
 .mini-eq .eq-b3 {
-  height: calc(2px + var(--mid, 0.2) * 8px);
+  transform: scaleY(calc(0.2 + var(--mid, 0.2) * 0.8));
 }
 .mini-eq .eq-b4 {
-  height: calc(2px + var(--treble, 0.2) * 8px);
+  transform: scaleY(calc(0.2 + var(--treble, 0.2) * 0.8));
 }
 
 .progress-track {
@@ -1146,8 +1152,12 @@ body,
 }
 
 .progress-fill {
+  width: 100%;
   height: 100%;
-  transition: width 0.25s linear, background-color 0.6s ease;
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
+  transition: background-color 0.4s ease;
   box-shadow: 0 0 calc(4px + var(--beat, 0) * 14px) rgba(255, 255, 255, 0.75);
 }
 

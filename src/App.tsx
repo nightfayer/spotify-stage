@@ -23,7 +23,7 @@ import { StageCanvas, type StageCanvasHandle } from './components/StageCanvas';
 import { SpotifyConnectModal } from './components/SpotifyConnectModal';
 import { LiveAudioAnalyzer } from './lib/audio';
 import { DEMO_LYRICS, DEMO_TRACKS } from './lib/demoTracks';
-import { fetchSyncedLyrics, getActiveLyricState } from './lib/lyrics';
+import { fetchSyncedLyrics, getActiveLyricState, type ActiveLyricState } from './lib/lyrics';
 import {
   extractPaletteFromImage,
   PALETTE_PRESETS,
@@ -83,6 +83,11 @@ const LYRIC_SLOTS = [
 
 const LYRIC_FX = ['fx-glitch', 'fx-slam', 'fx-wipe', 'fx-stamp'] as const;
 
+type StyledLyricState = ActiveLyricState & {
+  slot: (typeof LYRIC_SLOTS)[number];
+  fx: (typeof LYRIC_FX)[number];
+};
+
 function formatTime(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = Math.floor(totalSec / 60);
@@ -113,23 +118,19 @@ export function App() {
   const [lyrics, setLyrics] = useState<LyricLine[]>(DEMO_LYRICS[DEMO_TRACKS[0].id] ?? []);
   const lyricsOverlayRef = useRef<HTMLDivElement | null>(null);
   const lyricWordsRef = useRef<HTMLParagraphElement | null>(null);
+  const progressFillRef = useRef<HTMLDivElement | null>(null);
+  const timecodeRef = useRef<HTMLSpanElement | null>(null);
   const playbackClockRef = useRef<PlaybackClock>({
     progressMs: DEMO_TRACKS[0].progressMs,
     updatedAt: performance.now(),
     isPlaying: DEMO_TRACKS[0].isPlaying,
   });
+  const [activeLyric, setActiveLyric] = useState<StyledLyricState | null>(null);
 
-  // Sync playback clock ONLY when progressMs or isPlaying actually changes (prevents backward jumps on unrelated re-renders)
-  useEffect(() => {
-    playbackClockRef.current = {
-      progressMs: track.progressMs,
-      updatedAt: performance.now(),
-      isPlaying: track.isPlaying,
-    };
-  }, [track.progressMs, track.isPlaying]);
   const hudLayerRef = useRef<HTMLDivElement | null>(null);
   const lastVjSwitchRef = useRef<number>(Date.now());
   const [hudVisible, setHudVisible] = useState(true);
+  const hudVisibleRef = useRef(true);
   const [hudPinned, setHudPinned] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
@@ -138,6 +139,7 @@ export function App() {
   const lastTrackIdRef = useRef<string>(DEMO_TRACKS[0].id);
   const prevTitleTrackIdRef = useRef<string>(DEMO_TRACKS[0].id);
   const hideTimerRef = useRef<number | null>(null);
+  const lastHudWakeRef = useRef<number>(0);
   const noticeTimerRef = useRef<number | null>(null);
   const titleCardTimerRef = useRef<number | null>(null);
 
@@ -193,20 +195,19 @@ export function App() {
     return { ...track, palette: PALETTE_PRESETS[palettePreset] };
   }, [palettePreset, track]);
 
-  const activeLyric = useMemo(() => {
-    if (lyricMode === 'off') return null;
-    const state = getActiveLyricState(lyrics, track.progressMs);
-    if (!state) return null;
-    const slot = LYRIC_SLOTS[state.index % LYRIC_SLOTS.length];
-    const fx = LYRIC_FX[state.index % LYRIC_FX.length];
-    return { ...state, slot, fx };
-  }, [lyrics, lyricMode, track.progressMs]);
-
   const wakeHud = useCallback(() => {
-    setHudVisible(true);
+    const now = performance.now();
+    if (hudVisibleRef.current && now - lastHudWakeRef.current < 180) return;
+    lastHudWakeRef.current = now;
+
+    if (!hudVisibleRef.current) {
+      hudVisibleRef.current = true;
+      setHudVisible(true);
+    }
     if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
     if (!hudPinned && !modalOpen && !tuneOpen) {
       hideTimerRef.current = window.setTimeout(() => {
+        hudVisibleRef.current = false;
         setHudVisible(false);
       }, 3600);
     }
@@ -278,7 +279,7 @@ export function App() {
 
   const syncPlaybackRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Poll Spotify playback when authenticated
+  // Poll Spotify playback when authenticated (RTT-compensated, non-blocking palette & lyrics)
   useEffect(() => {
     if (!isAuthenticated) {
       syncPlaybackRef.current = null;
@@ -286,7 +287,12 @@ export function App() {
     }
 
     let cancelled = false;
+    let lyricsAbort: AbortController | null = null;
+    let inFlight = false;
+
     const syncPlayback = async () => {
+      if (inFlight || document.hidden) return;
+      inFlight = true;
       try {
         const snapshot = await fetchSpotifyPlayback();
         if (cancelled) return;
@@ -296,67 +302,171 @@ export function App() {
         }
         setStatusNotice(null);
 
+        // Update high-precision playback clock immediately with RTT-compensated timestamp
+        playbackClockRef.current = {
+          progressMs: snapshot.progressMs,
+          updatedAt: snapshot.sampledAt,
+          isPlaying: snapshot.isPlaying,
+        };
+
         const trackChanged = snapshot.id !== lastTrackIdRef.current;
         if (trackChanged) {
           lastTrackIdRef.current = snapshot.id;
-          const palette = await extractPaletteFromImage(snapshot.coverUrl);
-          if (cancelled) return;
-          setTrack({ ...snapshot, palette });
+          lyricsAbort?.abort();
+          lyricsAbort = new AbortController();
+          const signal = lyricsAbort.signal;
 
-          fetchSyncedLyrics(snapshot.artist, snapshot.title, snapshot.durationMs).then((lines) => {
-            if (!cancelled && lastTrackIdRef.current === snapshot.id) {
-              setLyrics(lines);
-            }
-          });
-        } else {
+          // Update track immediately without waiting for album art palette extraction
           setTrack((prev) => ({
-            ...prev,
+            id: snapshot.id,
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            coverUrl: snapshot.coverUrl,
+            genres: snapshot.genres,
+            durationMs: snapshot.durationMs,
             progressMs: snapshot.progressMs,
             isPlaying: snapshot.isPlaying,
+            palette: prev.palette,
           }));
+          setLyrics([]);
+
+          // Extract palette and fetch synced lyrics in parallel
+          void extractPaletteFromImage(snapshot.coverUrl).then((palette) => {
+            if (!cancelled && lastTrackIdRef.current === snapshot.id) {
+              setTrack((prev) => (prev.id === snapshot.id ? { ...prev, palette } : prev));
+            }
+          });
+
+          void fetchSyncedLyrics(snapshot.artist, snapshot.title, snapshot.durationMs, signal).then(
+            (lines) => {
+              if (!cancelled && lastTrackIdRef.current === snapshot.id) {
+                setLyrics(lines);
+              }
+            }
+          );
+        } else {
+          setTrack((prev) => {
+            const genresChanged =
+              snapshot.genres.length > 0 && prev.genres.length === 0;
+            if (prev.isPlaying === snapshot.isPlaying && !genresChanged) {
+              return prev;
+            }
+            return {
+              ...prev,
+              isPlaying: snapshot.isPlaying,
+              genres: genresChanged ? snapshot.genres : prev.genres,
+            };
+          });
         }
       } catch (err) {
         if (!cancelled) {
           setStatusNotice(err instanceof Error ? err.message : 'Ошибка связи со Spotify');
           if (!isSpotifyAuthenticated()) setIsAuthenticated(false);
         }
+      } finally {
+        inFlight = false;
       }
     };
 
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void syncPlayback();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     syncPlaybackRef.current = syncPlayback;
     void syncPlayback();
-    const interval = window.setInterval(syncPlayback, 3500);
+    const interval = window.setInterval(syncPlayback, 2000);
     return () => {
       cancelled = true;
+      lyricsAbort?.abort();
       syncPlaybackRef.current = null;
+      document.removeEventListener('visibilitychange', onVisibility);
       window.clearInterval(interval);
     };
   }, [isAuthenticated]);
 
-  // Drift-free 80ms progress tick for tight lyric & bouncing-ball sync
+  // 60+ FPS frame-accurate progress bar, timecode, and lyric sync (zero periodic React re-renders)
   useEffect(() => {
-    let lastTick = performance.now();
-    const timer = window.setInterval(() => {
+    let rafId = 0;
+    let lastSecond = -1;
+    let lastLyricKey = '';
+    const durationMs = Math.max(1, track.durationMs);
+    const formattedDuration = formatTime(durationMs);
+
+    const tick = () => {
+      rafId = requestAnimationFrame(tick);
+      if (document.hidden) return;
+
       const now = performance.now();
-      const elapsed = Math.min(400, Math.max(0, now - lastTick));
-      lastTick = now;
-      setTrack((prev) => {
-        if (!prev.isPlaying) return prev;
-        const next = prev.progressMs + elapsed;
-        if (next >= prev.durationMs) {
-          return { ...prev, progressMs: isAuthenticated ? prev.durationMs : 0 };
+      const clock = playbackClockRef.current;
+      let liveMs = clock.isPlaying ? clock.progressMs + (now - clock.updatedAt) : clock.progressMs;
+
+      if (liveMs >= durationMs) {
+        if (isAuthenticated) {
+          liveMs = durationMs;
+        } else {
+          liveMs = liveMs % durationMs;
+          clock.progressMs = liveMs;
+          clock.updatedAt = now;
         }
-        return { ...prev, progressMs: next };
-      });
-    }, 80);
-    return () => window.clearInterval(timer);
-  }, [isAuthenticated]);
+      }
+
+      // 1. GPU-composited progress bar (no React re-render, no layout reflow)
+      const fill = progressFillRef.current;
+      if (fill) {
+        fill.style.transform = `scaleX(${Math.min(1, Math.max(0, liveMs / durationMs)).toFixed(4)})`;
+      }
+
+      // 2. Timecode DOM update only once per second
+      const curSec = Math.floor(liveMs / 1000);
+      if (curSec !== lastSecond) {
+        lastSecond = curSec;
+        const tc = timecodeRef.current;
+        if (tc) {
+          tc.textContent = `${formatTime(liveMs)} / ${formattedDuration}`;
+        }
+      }
+
+      // 3. Frame-accurate lyric line & word trigger (re-renders ONLY when line or word changes)
+      if (lyricMode === 'off' || lyrics.length === 0) {
+        if (lastLyricKey !== 'off') {
+          lastLyricKey = 'off';
+          setActiveLyric(null);
+        }
+        return;
+      }
+
+      const state = getActiveLyricState(lyrics, liveMs);
+      const nextKey = state ? `${state.index}:${state.activeWordIndex}` : 'none';
+      if (nextKey !== lastLyricKey) {
+        lastLyricKey = nextKey;
+        if (!state) {
+          setActiveLyric(null);
+        } else {
+          const slot = LYRIC_SLOTS[state.index % LYRIC_SLOTS.length];
+          const fx = LYRIC_FX[state.index % LYRIC_FX.length];
+          setActiveLyric({ ...state, slot, fx });
+        }
+      }
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isAuthenticated, lyricMode, lyrics, track.durationMs, track.id]);
 
   // Sync demo track when not authenticated
   useEffect(() => {
     if (isAuthenticated) return;
     const demo = DEMO_TRACKS[demoIndex];
     lastTrackIdRef.current = demo.id;
+    playbackClockRef.current = {
+      progressMs: demo.progressMs,
+      updatedAt: performance.now(),
+      isPlaying: demo.isPlaying,
+    };
     setTrack(demo);
     setLyrics(DEMO_LYRICS[demo.id] ?? []);
   }, [demoIndex, isAuthenticated]);
@@ -365,8 +475,8 @@ export function App() {
   useEffect(() => {
     wakeHud();
     const onMove = () => wakeHud();
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchstart', onMove);
+    window.addEventListener('mousemove', onMove, { passive: true });
+    window.addEventListener('touchstart', onMove, { passive: true });
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('touchstart', onMove);
@@ -409,23 +519,40 @@ export function App() {
   }, [audioSource, showNotice]);
 
   const handlePlayPause = useCallback(async () => {
+    const nextPlaying = !track.isPlaying;
+    const now = performance.now();
+    const clock = playbackClockRef.current;
+    const currentMs = clock.isPlaying ? clock.progressMs + (now - clock.updatedAt) : clock.progressMs;
+
+    // Optimistic instant UI & clock update (0ms perceived latency)
+    playbackClockRef.current = {
+      progressMs: Math.min(track.durationMs, currentMs),
+      updatedAt: now,
+      isPlaying: nextPlaying,
+    };
+    setTrack((prev) => ({ ...prev, isPlaying: nextPlaying }));
+
     if (isAuthenticated) {
       try {
-        await controlSpotifyPlayback(track.isPlaying ? 'pause' : 'play');
-        setTrack((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
+        await controlSpotifyPlayback(nextPlaying ? 'play' : 'pause');
       } catch {
+        // Roll back on failure
+        playbackClockRef.current = {
+          progressMs: Math.min(track.durationMs, currentMs),
+          updatedAt: performance.now(),
+          isPlaying: !nextPlaying,
+        };
+        setTrack((prev) => ({ ...prev, isPlaying: !nextPlaying }));
         showNotice('Откройте активный плеер Spotify');
       }
-    } else {
-      setTrack((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
     }
-  }, [isAuthenticated, showNotice, track.isPlaying]);
+  }, [isAuthenticated, showNotice, track.durationMs, track.isPlaying]);
 
   const handleNext = useCallback(async () => {
     if (isAuthenticated) {
       try {
         await controlSpotifyPlayback('next');
-        window.setTimeout(() => void syncPlaybackRef.current?.(), 450);
+        window.setTimeout(() => void syncPlaybackRef.current?.(), 220);
       } catch {
         showNotice('Не удалось переключить трек');
       }
@@ -438,7 +565,7 @@ export function App() {
     if (isAuthenticated) {
       try {
         await controlSpotifyPlayback('previous');
-        window.setTimeout(() => void syncPlaybackRef.current?.(), 450);
+        window.setTimeout(() => void syncPlaybackRef.current?.(), 220);
       } catch {
         showNotice('Не удалось переключить трек');
       }
@@ -452,34 +579,48 @@ export function App() {
     showNotice('Постер сохранён', 1800);
   }, [effectiveTrack, showNotice]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (layout-independent via e.code so hotkeys respond instantly on RU/EN layouts)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (modalOpen) return;
-      if (e.key === '0') {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+
+      if (e.code === 'Digit0' || e.key === '0') {
         lastVjSwitchRef.current = Date.now();
         setBiomeChoice('auto');
-      }
-      if (e.key === '1') setBiomeChoice('pixel-horizon');
-      if (e.key === '2') setBiomeChoice('pixel-plasma');
-      if (e.key === '3') setBiomeChoice('pixel-tunnel');
-      if (e.key === '4') setBiomeChoice('pixel-kaleido');
-      if (e.key === '5') setBiomeChoice('pixel-echo');
-      if (e.key === '6') setBiomeChoice('kinetic-type');
-      if (e.key.toLowerCase() === 'm') void toggleMic();
-      if (e.key.toLowerCase() === 'a') void toggleSystemAudio();
-      if (e.key.toLowerCase() === 'l') cycleLyricMode();
-      if (e.key.toLowerCase() === 'f') cycleFontStyle();
-      if (e.key.toLowerCase() === 'g') setTuneOpen((v) => !v);
-      if (e.key.toLowerCase() === 's') handleSnapshot();
-      if (e.key.toLowerCase() === 'h') {
+      } else if (e.code === 'Digit1' || e.key === '1') {
+        setBiomeChoice('pixel-horizon');
+      } else if (e.code === 'Digit2' || e.key === '2') {
+        setBiomeChoice('pixel-plasma');
+      } else if (e.code === 'Digit3' || e.key === '3') {
+        setBiomeChoice('pixel-tunnel');
+      } else if (e.code === 'Digit4' || e.key === '4') {
+        setBiomeChoice('pixel-kaleido');
+      } else if (e.code === 'Digit5' || e.key === '5') {
+        setBiomeChoice('pixel-echo');
+      } else if (e.code === 'Digit6' || e.key === '6') {
+        setBiomeChoice('kinetic-type');
+      } else if (e.code === 'KeyM') {
+        void toggleMic();
+      } else if (e.code === 'KeyA') {
+        void toggleSystemAudio();
+      } else if (e.code === 'KeyL') {
+        cycleLyricMode();
+      } else if (e.code === 'KeyF') {
+        cycleFontStyle();
+      } else if (e.code === 'KeyG') {
+        setTuneOpen((v) => !v);
+      } else if (e.code === 'KeyS') {
+        handleSnapshot();
+      } else if (e.code === 'KeyH') {
         setHudPinned((prev) => {
           const next = !prev;
+          hudVisibleRef.current = true;
           setHudVisible(true);
           return next;
         });
-      }
-      if (e.code === 'Space') {
+      } else if (e.code === 'Space') {
         e.preventDefault();
         void handlePlayPause();
       }
@@ -532,7 +673,6 @@ export function App() {
     [biomeChoice]
   );
 
-  const progressPct = Math.min(100, (track.progressMs / Math.max(1, track.durationMs)) * 100);
   const hideCursor = !hudVisible && !hudPinned && !modalOpen && !tuneOpen;
 
   return (
@@ -541,6 +681,7 @@ export function App() {
         ref={stageRef}
         biome={resolvedBiome}
         track={effectiveTrack}
+        clockRef={playbackClockRef}
         getAudioMetrics={getMetrics}
         onMetricsFrame={handleMetricsFrame}
       />
@@ -695,7 +836,7 @@ export function App() {
                 {isAuthenticated ? 'Spotify Live' : 'Demo Stage'}
               </span>
               <span className="biome-tag">{resolvedBiome}</span>
-              <span className="timecode-tag">
+              <span ref={timecodeRef} className="timecode-tag">
                 {formatTime(track.progressMs)} / {formatTime(track.durationMs)}
               </span>
             </div>
@@ -703,9 +844,9 @@ export function App() {
             <p className="track-artist">{track.artist}</p>
             <div className="progress-track">
               <div
+                ref={progressFillRef}
                 className="progress-fill"
                 style={{
-                  width: `${progressPct}%`,
                   backgroundColor: effectiveTrack.palette.primary,
                 }}
               />

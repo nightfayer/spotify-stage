@@ -6,7 +6,9 @@ export class LiveAudioAnalyzer {
   private stream: MediaStream | null = null;
   private dataArray: Uint8Array<ArrayBuffer> | null = null;
   private bassHistory = 0;
+  private energyHistory = 0;
   private gain = 1.0;
+  private lastSampleTimeSec: number | null = null;
   private smoothed: AudioMetrics = {
     bass: 0,
     mid: 0,
@@ -23,11 +25,15 @@ export class LiveAudioAnalyzer {
   private connectStream(stream: MediaStream, sourceType: AudioSourceType, onEnded?: () => void): void {
     this.stop();
 
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ latencyHint: 'interactive' });
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
+    // 256 samples @ 48kHz = ~5.3ms FFT window; low smoothing keeps transient punch crisp
     analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.82;
+    analyser.smoothingTimeConstant = 0.28;
 
     source.connect(analyser);
 
@@ -43,6 +49,7 @@ export class LiveAudioAnalyzer {
     this.analyser = analyser;
     this.stream = stream;
     this.dataArray = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+    this.lastSampleTimeSec = null;
     this.smoothed.audioSource = sourceType;
   }
 
@@ -90,39 +97,69 @@ export class LiveAudioAnalyzer {
     this.analyser = null;
     this.dataArray = null;
     this.bassHistory = 0;
+    this.energyHistory = 0;
+    this.lastSampleTimeSec = null;
     this.smoothed.audioSource = 'none';
   }
 
+  // Frame-rate-independent asymmetric envelope (instant attack, smooth musical release)
+  private follow(current: number, target: number, dt: number, attackRate: number, releaseRate: number): number {
+    const rate = target > current ? attackRate : releaseRate;
+    const alpha = 1 - Math.exp(-rate * dt);
+    return current + (target - current) * alpha;
+  }
+
   sample(timeSec: number, isPlaying: boolean): AudioMetrics {
+    const dt =
+      this.lastSampleTimeSec === null
+        ? 1 / 60
+        : Math.min(0.05, Math.max(0.001, timeSec - this.lastSampleTimeSec));
+    this.lastSampleTimeSec = timeSec;
+
     if (this.analyser && this.dataArray && this.smoothed.audioSource !== 'none') {
+      if (this.ctx && this.ctx.state === 'suspended') {
+        void this.ctx.resume();
+      }
       this.analyser.getByteFrequencyData(this.dataArray);
       const bins = this.dataArray;
       const len = bins.length;
 
-      const avgRange = (start: number, end: number) => {
-        let sum = 0;
-        const clampedEnd = Math.min(len, end);
-        const count = Math.max(1, clampedEnd - start);
-        for (let i = start; i < clampedEnd; i++) sum += bins[i];
-        return sum / (count * 255);
-      };
+      let bassSum = 0;
+      const bassEnd = Math.min(len, 8);
+      for (let i = 0; i < bassEnd; i++) bassSum += bins[i];
+      const rawBass = Math.min(1, (bassSum / (Math.max(1, bassEnd) * 255)) * this.gain);
 
-      const rawBass = Math.min(1, avgRange(0, 8) * this.gain);
-      const rawMid = Math.min(1, avgRange(8, 36) * this.gain);
-      const rawTreble = Math.min(1, avgRange(36, 96) * this.gain);
+      let midSum = 0;
+      const midEnd = Math.min(len, 36);
+      for (let i = 8; i < midEnd; i++) midSum += bins[i];
+      const rawMid = Math.min(1, (midSum / (Math.max(1, midEnd - 8) * 255)) * this.gain);
+
+      let trebleSum = 0;
+      const trebleEnd = Math.min(len, 96);
+      for (let i = 36; i < trebleEnd; i++) trebleSum += bins[i];
+      const rawTreble = Math.min(1, (trebleSum / (Math.max(1, trebleEnd - 36) * 255)) * this.gain);
+
       const rawEnergy = rawBass * 0.5 + rawMid * 0.35 + rawTreble * 0.15;
 
-      const delta = rawBass - this.bassHistory;
-      this.bassHistory += (rawBass - this.bassHistory) * 0.1;
-      const beatImpulse = delta > 0.032 ? Math.min(1, delta * 5.5) : 0;
+      // Zero-lag transient detector: snap beat immediately on kick/drop, decay smoothly
+      const bassDelta = rawBass - this.bassHistory;
+      const energyDelta = rawEnergy - this.energyHistory;
+      const histAlpha = 1 - Math.exp(-7.5 * dt);
+      this.bassHistory += (rawBass - this.bassHistory) * histAlpha;
+      this.energyHistory += (rawEnergy - this.energyHistory) * histAlpha;
 
-      this.smoothed.bass += (rawBass - this.smoothed.bass) * 0.28;
-      this.smoothed.mid += (rawMid - this.smoothed.mid) * 0.24;
-      this.smoothed.treble += (rawTreble - this.smoothed.treble) * 0.24;
-      this.smoothed.energy += (rawEnergy - this.smoothed.energy) * 0.24;
-      this.smoothed.beat += (Math.max(this.smoothed.beat * 0.88, beatImpulse) - this.smoothed.beat) * 0.38;
+      const transient = Math.max(bassDelta * 6.2, energyDelta * 4.8);
+      const beatImpulse = transient > 0.16 ? Math.min(1, transient) : 0;
 
-      return { ...this.smoothed };
+      this.smoothed.bass = this.follow(this.smoothed.bass, rawBass, dt, 48, 12);
+      this.smoothed.mid = this.follow(this.smoothed.mid, rawMid, dt, 42, 11);
+      this.smoothed.treble = this.follow(this.smoothed.treble, rawTreble, dt, 44, 13);
+      this.smoothed.energy = this.follow(this.smoothed.energy, rawEnergy, dt, 38, 10);
+
+      const decayedBeat = this.smoothed.beat * Math.exp(-10.5 * dt);
+      this.smoothed.beat = beatImpulse > decayedBeat ? beatImpulse : decayedBeat;
+
+      return this.smoothed;
     }
 
     const active = isPlaying ? 1 : 0.2;
@@ -130,12 +167,13 @@ export class LiveAudioAnalyzer {
     const drift2 = (0.12 + 0.07 * Math.cos(timeSec * 0.32)) * active;
     const drift3 = (0.1 + 0.06 * Math.sin(timeSec * 0.6)) * active;
 
-    this.smoothed.bass += (drift1 - this.smoothed.bass) * 0.08;
-    this.smoothed.mid += (drift2 - this.smoothed.mid) * 0.08;
-    this.smoothed.treble += (drift3 - this.smoothed.treble) * 0.08;
-    this.smoothed.beat += (0 - this.smoothed.beat) * 0.1;
+    const idleAlpha = 1 - Math.exp(-5.0 * dt);
+    this.smoothed.bass += (drift1 - this.smoothed.bass) * idleAlpha;
+    this.smoothed.mid += (drift2 - this.smoothed.mid) * idleAlpha;
+    this.smoothed.treble += (drift3 - this.smoothed.treble) * idleAlpha;
+    this.smoothed.beat *= Math.exp(-6.5 * dt);
     this.smoothed.energy = (this.smoothed.bass + this.smoothed.mid + this.smoothed.treble) / 3;
 
-    return { ...this.smoothed };
+    return this.smoothed;
   }
 }

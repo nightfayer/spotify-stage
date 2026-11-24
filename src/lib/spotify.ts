@@ -203,15 +203,20 @@ export interface SpotifyPlaybackSnapshot {
   durationMs: number;
   progressMs: number;
   isPlaying: boolean;
+  /** performance.now() timestamp when progressMs was measured (RTT-compensated) */
+  sampledAt: number;
 }
 
-export async function fetchSpotifyPlayback(): Promise<SpotifyPlaybackSnapshot | null> {
+export async function fetchSpotifyPlayback(signal?: AbortSignal): Promise<SpotifyPlaybackSnapshot | null> {
   const token = await getValidAccessToken();
   if (!token) return null;
 
+  const reqStart = performance.now();
   const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
+  const reqEnd = performance.now();
 
   if (res.status === 204 || res.status === 404) {
     return null;
@@ -230,8 +235,25 @@ export async function fetchSpotifyPlayback(): Promise<SpotifyPlaybackSnapshot | 
   const item = data?.item;
   if (!item || item.type !== 'track') return null;
 
-  const primaryArtist = item.artists?.[0];
-  const genres = primaryArtist?.id ? await fetchArtistGenres(primaryArtist.id, token) : [];
+  const isPlaying = Boolean(data.is_playing);
+  const durationMs = item.duration_ms ?? 180_000;
+  // Compensate half of network RTT so playback clock aligns closely with actual audio
+  const halfRttMs = isPlaying ? Math.min(400, (reqEnd - reqStart) * 0.5) : 0;
+  const rawProgressMs = data.progress_ms ?? 0;
+  const progressMs = Math.min(durationMs, rawProgressMs + halfRttMs);
+
+  // Never block playback snapshot on genre lookup: use cache immediately or warm cache in background
+  const primaryArtistId: string | undefined = item.artists?.[0]?.id;
+  let genres: string[] = [];
+  if (primaryArtistId) {
+    const cached = artistGenreCache.get(primaryArtistId);
+    if (cached) {
+      genres = cached;
+    } else {
+      void fetchArtistGenres(primaryArtistId, token);
+    }
+  }
+
   const images = item.album?.images ?? [];
   const coverUrl = images[0]?.url ?? null;
 
@@ -242,9 +264,10 @@ export async function fetchSpotifyPlayback(): Promise<SpotifyPlaybackSnapshot | 
     album: item.album?.name ?? '',
     coverUrl,
     genres,
-    durationMs: item.duration_ms ?? 180_000,
-    progressMs: data.progress_ms ?? 0,
-    isPlaying: Boolean(data.is_playing),
+    durationMs,
+    progressMs,
+    isPlaying,
+    sampledAt: reqEnd,
   };
 }
 

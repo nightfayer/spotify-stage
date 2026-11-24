@@ -1,6 +1,7 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import type { AudioMetrics, ResolvedBiome, TrackState } from '../types';
+import type { PlaybackClock } from './BouncingBall';
 
 export interface StageCanvasHandle {
   capturePoster: (track: TrackState) => void;
@@ -10,6 +11,7 @@ export interface StageCanvasHandle {
 interface StageCanvasProps {
   biome: ResolvedBiome;
   track: TrackState;
+  clockRef: React.RefObject<PlaybackClock>;
   getAudioMetrics: (timeSec: number, isPlaying: boolean) => AudioMetrics;
   onMetricsFrame?: (metrics: AudioMetrics) => void;
 }
@@ -493,23 +495,24 @@ const TRANSITION_COMPOSITE_FRAGMENT = `
   }
 `;
 
-export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(function StageCanvas(
-  { biome, track, getAudioMetrics, onMetricsFrame },
-  ref
-) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const renderOnceRef = useRef<(() => void) | null>(null);
-  const triggerShockRef = useRef<((nx?: number, ny?: number) => void) | null>(null);
-  const biomeRef = useRef<ResolvedBiome>(biome);
-  const trackRef = useRef<TrackState>(track);
-  const metricsFnRef = useRef(getAudioMetrics);
-  const onMetricsFrameRef = useRef(onMetricsFrame);
+export const StageCanvas = memo(
+  forwardRef<StageCanvasHandle, StageCanvasProps>(function StageCanvas(
+    { biome, track, clockRef, getAudioMetrics, onMetricsFrame },
+    ref
+  ) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const renderOnceRef = useRef<(() => void) | null>(null);
+    const triggerShockRef = useRef<((nx?: number, ny?: number) => void) | null>(null);
+    const biomeRef = useRef<ResolvedBiome>(biome);
+    const trackRef = useRef<TrackState>(track);
+    const metricsFnRef = useRef(getAudioMetrics);
+    const onMetricsFrameRef = useRef(onMetricsFrame);
 
-  biomeRef.current = biome;
-  trackRef.current = track;
-  metricsFnRef.current = getAudioMetrics;
-  onMetricsFrameRef.current = onMetricsFrame;
+    biomeRef.current = biome;
+    trackRef.current = track;
+    metricsFnRef.current = getAudioMetrics;
+    onMetricsFrameRef.current = onMetricsFrame;
 
   useImperativeHandle(ref, () => ({
     triggerShockwave(nx = 0.5, ny = 0.5) {
@@ -686,10 +689,29 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     const compMesh = new THREE.Mesh(quadGeo, compMat);
     compScene.add(compMesh);
 
+    // Pre-compile all shader programs up-front so biome switches (1-6 / Auto VJ) have 0ms stutter
+    const allMats: THREE.ShaderMaterial[] = [
+      ...Object.values(materials),
+      echoMat,
+      blitMat,
+    ];
+    for (const mat of allMats) {
+      quadMesh.material = mat;
+      renderer.compile(scene, camera);
+    }
+    renderer.compile(compScene, camera);
+    quadMesh.material = materials['pixel-horizon'];
+
+    let currentWidth = width;
+    let currentHeight = height;
+
     const handleResize = () => {
       if (!container) return;
       const w = Math.max(1, container.clientWidth);
       const h = Math.max(1, container.clientHeight);
+      if (w === currentWidth && h === currentHeight) return;
+      currentWidth = w;
+      currentHeight = h;
       renderer.setSize(w, h);
       rtPrev.setSize(w, h);
       rtCurr.setSize(w, h);
@@ -699,10 +721,13 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
       compUniforms.uResolution.value.set(w, h);
     };
     window.addEventListener('resize', handleResize);
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
+    resizeObserver?.observe(container);
 
-    const clock = new THREE.Clock();
     let rafId = 0;
-    let lastTime = 0;
+    let lastPerfMs = performance.now();
+    let elapsedSec = 0;
     let flowTime = 0;
     let smoothProgress = 0;
     let prevBiome: ResolvedBiome = biomeRef.current;
@@ -727,9 +752,10 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     container.addEventListener('pointerdown', handlePointerDown);
 
     const renderFrame = () => {
-      const t = clock.getElapsedTime();
-      const dt = Math.min(0.1, Math.max(0.001, t - lastTime));
-      lastTime = t;
+      const nowMs = performance.now();
+      const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastPerfMs) * 0.001));
+      lastPerfMs = nowMs;
+      elapsedSec += dt;
 
       const activeTrack = trackRef.current;
       const nextBiome = biomeRef.current;
@@ -742,24 +768,24 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
       }
 
       if (transitionProgress < 1.0) {
-        transitionProgress = Math.min(1.0, transitionProgress + dt / 0.85);
+        transitionProgress = Math.min(1.0, transitionProgress + dt / 0.55);
       }
 
       if (shockAge < 1.0) {
-        shockAge = Math.min(1.0, shockAge + dt / 0.85);
+        shockAge = Math.min(1.0, shockAge + dt / 0.65);
       }
 
-      const metrics = metricsFnRef.current(t, activeTrack.isPlaying);
+      const metrics = metricsFnRef.current(elapsedSec, activeTrack.isPlaying);
       onMetricsFrameRef.current?.(metrics);
 
-      // Auto-trigger pixel shockwave on strong live bass drops (min 1.2s cooldown)
+      // Auto-trigger pixel shockwave on strong live bass drops (min 1.0s cooldown)
       if (
         metrics.audioSource !== 'none' &&
         metrics.beat > 0.72 &&
-        metrics.bass > 0.48 &&
-        t - lastAutoShockTime > 1.2
+        metrics.bass > 0.45 &&
+        elapsedSec - lastAutoShockTime > 1.0
       ) {
-        lastAutoShockTime = t;
+        lastAutoShockTime = elapsedSec;
         launchShockwave(0.5, 0.5);
       }
 
@@ -777,13 +803,19 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         targetBg.set(pal.background);
       }
 
-      colPrimary.lerp(targetPrimary, 0.06);
-      colSecondary.lerp(targetSecondary, 0.06);
-      colAccent.lerp(targetAccent, 0.06);
-      colBg.lerp(targetBg, 0.06);
+      // Frame-rate-independent palette & progress smoothing (consistent across 60Hz/120Hz/144Hz)
+      const colorLerp = 1 - Math.exp(-5.5 * dt);
+      colPrimary.lerp(targetPrimary, colorLerp);
+      colSecondary.lerp(targetSecondary, colorLerp);
+      colAccent.lerp(targetAccent, colorLerp);
+      colBg.lerp(targetBg, colorLerp);
 
-      const targetProgress = activeTrack.progressMs / Math.max(1, activeTrack.durationMs);
-      smoothProgress += (targetProgress - smoothProgress) * 0.04;
+      const clock = clockRef.current;
+      const liveProgressMs = clock.isPlaying
+        ? clock.progressMs + (nowMs - clock.updatedAt)
+        : clock.progressMs;
+      const targetProgress = Math.min(1, Math.max(0, liveProgressMs / Math.max(1, activeTrack.durationMs)));
+      smoothProgress += (targetProgress - smoothProgress) * (1 - Math.exp(-4.0 * dt));
 
       sharedUniforms.uTime.value = flowTime;
       sharedUniforms.uBass.value = metrics.bass;
@@ -839,14 +871,33 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     renderOnceRef.current = renderFrame;
 
     const animate = () => {
+      if (document.hidden) {
+        rafId = 0;
+        return;
+      }
       rafId = requestAnimationFrame(animate);
       renderFrame();
     };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      } else if (!rafId) {
+        lastPerfMs = performance.now();
+        animate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     animate();
 
     return () => {
       cancelAnimationFrame(rafId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      resizeObserver?.disconnect();
       window.removeEventListener('resize', handleResize);
       container.removeEventListener('pointerdown', handlePointerDown);
       renderOnceRef.current = null;
@@ -865,7 +916,8 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [clockRef]);
 
   return <div ref={containerRef} className="stage-canvas" />;
-});
+  })
+);
