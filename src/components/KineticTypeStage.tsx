@@ -139,17 +139,19 @@ export const KineticTypeStage = memo(function KineticTypeStage({
 
   // High-contrast After Effects color inversion flip every 2 lines (Dark/Color <-> Color/Black)
   const isInverted = !isInterlude && Math.floor(lineIndex / 2) % 2 === 1;
+  const isPhraseEndPullBack = placedWords.length >= 3 && activeWordIdx === placedWords.length - 1;
+  const isShortHook = placedWords.length <= 2;
 
-  const cameraStyle = useMemo(
-    () =>
-      ({
-        '--cam-x': focusWord ? focusWord.x : 0,
-        '--cam-y': focusWord ? focusWord.y : 0,
-        '--cam-rot': focusWord ? focusWord.rot : 0,
-        '--cam-zoom': focusWord ? Number((focusWord.zoom * viewportScale).toFixed(3)) : viewportScale,
-      }) as React.CSSProperties,
-    [focusWord, viewportScale]
-  );
+  const cameraStyle = useMemo(() => {
+    const baseZoom = focusWord ? focusWord.zoom * viewportScale : viewportScale;
+    const finalZoom = isPhraseEndPullBack ? baseZoom * 0.88 : baseZoom;
+    return {
+      '--cam-x': focusWord ? focusWord.x : 0,
+      '--cam-y': focusWord ? focusWord.y : 0,
+      '--cam-rot': focusWord ? focusWord.rot : 0,
+      '--cam-zoom': Number(finalZoom.toFixed(3)),
+    } as React.CSSProperties;
+  }, [focusWord, isPhraseEndPullBack, viewportScale]);
 
   return (
     <div
@@ -211,6 +213,9 @@ export const KineticTypeStage = memo(function KineticTypeStage({
                     } as React.CSSProperties
                   }
                 >
+                  {isShortHook && isActive && (
+                    <span className="ae-hook-ring" key={`ring-${item.id}`} aria-hidden="true" />
+                  )}
                   <span className="ae-world-word-text">{item.word}</span>
                 </div>
               );

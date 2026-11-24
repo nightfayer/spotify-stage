@@ -2025,9 +2025,21 @@ body,
   }
 }
 
-/* Elastic After Effects Squash & Stretch punch on each active word */
-.ae-world-word.is-active .ae-world-word-text {
+/* Distinct After Effects entrance physics per typographic variant */
+.ae-world-word.variant-solid.is-active .ae-world-word-text {
   animation: aeWordSquash 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ae-world-word.variant-outline.is-active .ae-world-word-text {
+  animation: aeWordWipe 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ae-world-word.variant-serif.is-active .ae-world-word-text {
+  animation: aeWordDropZoom 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ae-world-word.variant-hero.is-active .ae-world-word-text {
+  animation: aeWordHeroPunch 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes aeWordSquash {
@@ -2039,6 +2051,78 @@ body,
   }
   100% {
     transform: scale(calc(1.03 + var(--beat, 0) * 0.04));
+  }
+}
+
+@keyframes aeWordWipe {
+  0% {
+    clip-path: inset(0 100% 0 0);
+    transform: translate3d(-12px, 0, 0);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    transform: translate3d(0, 0, 0) scale(calc(1.02 + var(--beat, 0) * 0.03));
+  }
+}
+
+@keyframes aeWordDropZoom {
+  0% {
+    opacity: 0;
+    transform: scale(1.24) translate3d(0, -10px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(calc(1.02 + var(--beat, 0) * 0.04)) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes aeWordHeroPunch {
+  0% {
+    transform: scale(0.68);
+  }
+  50% {
+    transform: scale(1.09);
+  }
+  100% {
+    transform: scale(calc(1.04 + var(--beat, 0) * 0.05));
+  }
+}
+
+/* Subtle Film Grain overlay on Type scene (gives flat solid/inverted backdrops rich AE texture) */
+.ae-canvas-stage::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+/* Geometric expanding ring behind short 1-2 word impact hooks (visual callback to 00:00 intro circle) */
+.ae-hook-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(180px, 28vw, 320px);
+  height: clamp(180px, 28vw, 320px);
+  border-radius: 50%;
+  border: 2.5px solid var(--ae-ink);
+  z-index: -1;
+  pointer-events: none;
+  animation: aeHookRingBurst 0.44s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes aeHookRingBurst {
+  0% {
+    opacity: 0.65;
+    transform: translate(-50%, -50%) scale(0.42);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.22);
   }
 }
 
