@@ -375,6 +375,45 @@ body,
   transform-style: preserve-3d;
 }
 
+/* Outline-to-Fill Shot: hollow stroke words fill solidly on active */
+.reels-shot.shot-outline-fill .reels-word-inner {
+  color: transparent;
+  -webkit-text-stroke: 1.4px color-mix(in srgb, var(--reel-primary) 55%, rgba(255, 255, 255, 0.72));
+  text-shadow: none;
+}
+
+.reels-shot.shot-outline-fill .reels-word-mask.is-active .reels-word-inner {
+  -webkit-text-stroke: 0px transparent;
+}
+
+/* Variable Brutal Font Mode (Unbounded — weight breathes with --beat!) */
+.reels-type-stage.font-brutal .reels-word-inner,
+.reels-type-stage.font-brutal .reels-word-mask.is-hero .reels-word-inner {
+  font-family: 'Unbounded', 'Inter', sans-serif;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  font-variation-settings: 'wght' calc(360 + var(--beat, 0) * 520);
+}
+
+.reels-type-stage.font-brutal .reels-word-mask.is-hero .reels-word-inner {
+  font-size: clamp(2.1rem, 5vw, 4.6rem);
+  font-variation-settings: 'wght' calc(540 + var(--beat, 0) * 360);
+}
+
+.lyrics-overlay.is-brutal-font p,
+.lyrics-scroll-stack.is-brutal-font .scroll-line {
+  font-family: 'Unbounded', 'Inter', sans-serif;
+  text-transform: uppercase;
+  font-variation-settings: 'wght' calc(360 + var(--beat, 0) * 520);
+  letter-spacing: -0.02em;
+}
+
+.lyrics-overlay.is-brutal-font p {
+  font-size: clamp(1.3rem, 2.6vw, 2.3rem);
+  line-height: 1.28;
+}
+
 /* 7th Montage Shot: Mirror Echo (The Weeknd / Billie Eilish split echo layers) */
 .reels-shot.shot-mirror-echo .reels-word-mask.is-hero {
   overflow: visible;

@@ -38,6 +38,7 @@ import {
 import type {
   AudioSourceType,
   BiomeId,
+  FontStyleMode,
   LyricLine,
   LyricMode,
   PalettePresetId,
@@ -103,7 +104,7 @@ export function App() {
   const [vjStep, setVjStep] = useState(0);
   const [audioSource, setAudioSource] = useState<AudioSourceType>('none');
   const [lyricMode, setLyricMode] = useState<LyricMode>('kinetic');
-  const [pixelFont, setPixelFont] = useState(true);
+  const [fontStyle, setFontStyle] = useState<FontStyleMode>('pixel');
   const [bouncingBall, setBouncingBall] = useState(true);
   const [palettePreset, setPalettePreset] = useState<PalettePresetId>('cover');
   const [audioGain, setAudioGain] = useState(1.0);
@@ -230,6 +231,20 @@ export function App() {
         off: 'Субтитры: Выкл',
       };
       showNotice(labels[next], 1600);
+      return next;
+    });
+  }, [showNotice]);
+
+  const cycleFontStyle = useCallback(() => {
+    setFontStyle((prev) => {
+      const next: FontStyleMode =
+        prev === 'pixel' ? 'editorial' : prev === 'editorial' ? 'brutal' : 'pixel';
+      const labels: Record<FontStyleMode, string> = {
+        pixel: 'Шрифт: 8-bit Pixel',
+        editorial: 'Шрифт: Журнальный (Editorial)',
+        brutal: 'Шрифт: Вариативный Brutal (Unbounded)',
+      };
+      showNotice(labels[next], 1700);
       return next;
     });
   }, [showNotice]);
@@ -454,7 +469,7 @@ export function App() {
       if (e.key.toLowerCase() === 'm') void toggleMic();
       if (e.key.toLowerCase() === 'a') void toggleSystemAudio();
       if (e.key.toLowerCase() === 'l') cycleLyricMode();
-      if (e.key.toLowerCase() === 'f') setPixelFont((v) => !v);
+      if (e.key.toLowerCase() === 'f') cycleFontStyle();
       if (e.key.toLowerCase() === 'g') setTuneOpen((v) => !v);
       if (e.key.toLowerCase() === 's') handleSnapshot();
       if (e.key.toLowerCase() === 'h') {
@@ -471,7 +486,15 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cycleLyricMode, handlePlayPause, handleSnapshot, modalOpen, toggleMic, toggleSystemAudio]);
+  }, [
+    cycleFontStyle,
+    cycleLyricMode,
+    handlePlayPause,
+    handleSnapshot,
+    modalOpen,
+    toggleMic,
+    toggleSystemAudio,
+  ]);
 
   const getMetrics = useCallback((t: number, playing: boolean) => {
     return analyzerRef.current!.sample(t, playing);
@@ -549,6 +572,7 @@ export function App() {
           beatRef={lyricsOverlayRef}
           clockRef={playbackClockRef}
           showBall={bouncingBall}
+          fontStyle={fontStyle}
         />
       )}
 
@@ -559,7 +583,7 @@ export function App() {
         lyricMode === 'kinetic' && (
         <div
           ref={lyricsOverlayRef}
-          className={`lyrics-overlay ${activeLyric.slot} ${activeLyric.fx} ${pixelFont ? 'is-pixel-font' : ''}`}
+          className={`lyrics-overlay ${activeLyric.slot} ${activeLyric.fx} ${fontStyle === 'pixel' ? 'is-pixel-font' : fontStyle === 'brutal' ? 'is-brutal-font' : ''}`}
           key={`${track.id}-${activeLyric.index}`}
           style={
             {
@@ -577,7 +601,7 @@ export function App() {
               wordCount={activeLyric.words.length}
               lineKey={`${track.id}-${activeLyric.index}`}
               wordSelector=".lyric-word"
-              pixelStyle={pixelFont}
+              pixelStyle={fontStyle === 'pixel'}
               visible={bouncingBall}
             />
             {activeLyric.words.map((word, wIdx) => {
@@ -603,7 +627,7 @@ export function App() {
         lyricMode === 'scroll' && (
         <div
           ref={lyricsOverlayRef}
-          className={`lyrics-scroll-stack ${pixelFont ? 'is-pixel-font' : ''}`}
+          className={`lyrics-scroll-stack ${fontStyle === 'pixel' ? 'is-pixel-font' : fontStyle === 'brutal' ? 'is-brutal-font' : ''}`}
           style={
             {
               '--lyric-accent': effectiveTrack.palette.accent,
@@ -625,7 +649,7 @@ export function App() {
               wordCount={activeLyric.words.length}
               lineKey={`scroll-${track.id}-${activeLyric.index}`}
               wordSelector=".lyric-word"
-              pixelStyle={pixelFont}
+              pixelStyle={fontStyle === 'pixel'}
               visible={bouncingBall}
             />
             {activeLyric.words.map((word, wIdx) => {
@@ -797,9 +821,9 @@ export function App() {
 
               <button
                 type="button"
-                className={`icon-btn ${pixelFont ? 'is-active-pill' : ''}`}
-                onClick={() => setPixelFont((v) => !v)}
-                title="8-битный шрифт лирики (F)"
+                className={`icon-btn ${fontStyle !== 'editorial' ? 'is-active-pill' : ''}`}
+                onClick={cycleFontStyle}
+                title={`Шрифт: ${fontStyle} (F)`}
               >
                 <Type size={16} />
               </button>

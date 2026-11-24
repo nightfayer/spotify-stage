@@ -13,6 +13,8 @@ export type PalettePresetId = 'cover' | 'gameboy' | 'sunset' | 'cyber' | 'crimso
 
 export type LyricMode = 'kinetic' | 'scroll' | 'off';
 
+export type FontStyleMode = 'pixel' | 'editorial' | 'brutal';
+
 export interface TrackPalette {
   primary: string;
   secondary: string;

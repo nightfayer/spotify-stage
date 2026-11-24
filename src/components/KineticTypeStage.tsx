@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ActiveLyricState } from '../lib/lyrics';
-import type { TrackState } from '../types';
+import type { FontStyleMode, TrackState } from '../types';
 import { BouncingBall, type PlaybackClock } from './BouncingBall';
 
 interface KineticTypeStageProps {
@@ -9,10 +9,12 @@ interface KineticTypeStageProps {
   beatRef: React.RefObject<HTMLDivElement | null>;
   clockRef: React.RefObject<PlaybackClock>;
   showBall: boolean;
+  fontStyle: FontStyleMode;
 }
 
 const SHOT_STYLES = [
   'shot-hero-italic',
+  'shot-outline-fill',
   'shot-mirror-echo',
   'shot-staircase',
   'shot-marker-pop',
@@ -55,6 +57,7 @@ export function KineticTypeStage({
   beatRef,
   clockRef,
   showBall,
+  fontStyle,
 }: KineticTypeStageProps) {
   const wordsContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -101,7 +104,7 @@ export function KineticTypeStage({
   return (
     <div
       ref={beatRef}
-      className="reels-type-stage"
+      className={`reels-type-stage font-${fontStyle}`}
       style={
         {
           '--reel-primary': track.palette.primary,
