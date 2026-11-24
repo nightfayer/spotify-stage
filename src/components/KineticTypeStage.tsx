@@ -169,23 +169,6 @@ export const KineticTypeStage = memo(function KineticTypeStage({
         <div ref={topProgressFillRef} className="reels-top-progress-fill" />
       </div>
 
-      {/* Top header pill (auto-adapts contrast on inverted color background) */}
-      <div className="reels-frame-meta" aria-hidden="true">
-        <span className="reels-shot-badge">
-          <i className="reels-live-dot" />
-          SHOT {String(lineIndex + 1).padStart(2, '0')}
-        </span>
-
-        <div className="reels-music-pill">
-          {track.coverUrl && <img src={track.coverUrl} alt="" className="reels-pill-cover" />}
-          <span>
-            {track.title} · {track.artist}
-          </span>
-        </div>
-
-        <span>{track.album.toUpperCase()}</span>
-      </div>
-
       {/* Signature Intro / Interlude Pulsing Circle (like 00:00 of the reference video) OR Continuous 2D Camera */}
       {isInterlude ? (
         <div className="ae-intro-circle-wrap" aria-hidden="true">

@@ -1852,21 +1852,6 @@ body,
   --ae-ink-strong: #050507;
 }
 
-.ae-canvas-stage.is-inverted .reels-frame-meta {
-  color: rgba(7, 7, 9, 0.72);
-}
-
-.ae-canvas-stage.is-inverted .reels-music-pill {
-  background: rgba(7, 7, 9, 0.12);
-  border-color: rgba(7, 7, 9, 0.22);
-  color: #070709;
-}
-
-.ae-canvas-stage.is-inverted .reels-live-dot {
-  background: #070709;
-  box-shadow: none;
-}
-
 .ae-canvas-stage.is-inverted .reels-top-progress {
   background: rgba(7, 7, 9, 0.14);
 }

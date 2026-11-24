@@ -8,7 +8,7 @@ import {
   normalizeForMatch,
   parseLrc,
 } from '../lyrics';
-import { ensureReadablePalette, resolveBiomeForGenres } from '../palette';
+import { boostVibrantColor, ensureReadablePalette, resolveBiomeForGenres } from '../palette';
 
 describe('lyrics utilities', () => {
   it('parses synced LRC lines including multi-timestamp choruses and 1-digit minutes', () => {
@@ -83,6 +83,12 @@ describe('palette utilities', () => {
     expect(safe.background).not.toBe('#f5f5f5');
     expect(safe.primary).not.toBe('#050508');
     expect(safe.accent).not.toBe('#101018');
+  });
+
+  it('boosts desaturated or gray colors for vivid inverted Type backdrops', () => {
+    const vivid = boostVibrantColor('#808080');
+    expect(vivid).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(vivid.toLowerCase()).not.toBe('#808080');
   });
 
   it('maps genres to appropriate default biomes', () => {
