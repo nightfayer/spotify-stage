@@ -1842,12 +1842,14 @@ body,
 
 .ae-canvas-stage.is-dark {
   background: #050507;
+  --ae-bg: #050507;
   --ae-ink: var(--reel-primary);
   --ae-ink-strong: var(--reel-accent);
 }
 
 .ae-canvas-stage.is-inverted {
   background: var(--reel-primary);
+  --ae-bg: var(--reel-primary);
   --ae-ink: #070709;
   --ae-ink-strong: #050507;
 }
@@ -1918,13 +1920,14 @@ body,
     color 0.16s ease;
 }
 
-/* Typographic Contrast Mix matching the reference video (Tight Neo-Grotesk / Hollow Outline / High-Contrast Serif / Rounded Bold Hero) */
+/* Typographic Contrast Mix matching the reference video (Tight Neo-Grotesk / Clean Outline / High-Contrast Serif / Rounded Bold Hero) */
 .ae-world-word.variant-outline .ae-world-word-text {
   font-family: 'Manrope', 'Helvetica Neue', sans-serif;
-  color: transparent;
-  -webkit-text-stroke: 2.4px var(--ae-ink);
+  color: var(--ae-bg);
+  -webkit-text-stroke: 4.4px var(--ae-ink);
+  paint-order: stroke fill;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
 .ae-world-word.variant-serif .ae-world-word-text {
@@ -1970,8 +1973,9 @@ body,
 }
 
 .ae-world-word.variant-outline.is-active .ae-world-word-text {
-  color: transparent;
-  -webkit-text-stroke: 2.8px var(--ae-ink-strong);
+  color: var(--ae-bg);
+  -webkit-text-stroke: 5px var(--ae-ink-strong);
+  paint-order: stroke fill;
 }
 
 /* Signature 00:00 Reference Video Intro / Interlude Pulsing Circle */
