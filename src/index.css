@@ -274,6 +274,8 @@ body,
 
 .reels-word-inner {
   display: inline-block;
+  padding: 0.04em 0.14em 0.08em 0.06em;
+  margin: -0.04em -0.14em -0.08em -0.06em;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: clamp(1.5rem, 3.2vw, 3rem);
   font-weight: 500;
@@ -334,6 +336,10 @@ body,
 }
 
 /* Impact Shot for punchy 1-2 word hooks & exclamations */
+.reels-shot.shot-impact-hook .reels-word-mask {
+  overflow: visible;
+}
+
 .reels-shot.shot-impact-hook .reels-word-inner {
   font-family: 'Inter', -apple-system, sans-serif;
   font-style: normal;
@@ -343,6 +349,11 @@ body,
   letter-spacing: 0.04em;
   line-height: 1.05;
   animation: impactHookIn 0.44s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Allow 3D hero flip without mask clipping */
+.reels-word-mask.is-hero.is-active {
+  overflow: visible;
 }
 
 @keyframes impactHookIn {
