@@ -1,42 +1,65 @@
 # Spotify Stage
 
-Second-screen WebGL music visualizer for Spotify with 8-bit Bayer-dithered worlds, an editorial Reels typography stage, real-time audio reactivity, and synced word-by-word lyrics.
+Полноэкранный WebGL-визуализатор для Spotify на второй монитор или телевизор: 8-битные миры с Bayer-дизерингом, типографическая сцена в стиле музыкальных Reels, реакция на живой звук и синхронизированная пословная лирика с параболическим шариком.
 
-## Features
+![Сцена Type — Editorial Reels и прыгающий шарик](./docs/screenshots/type-reels.png)
 
-- **6 WebGL Scenes**: `Ocean`, `Plasma`, `Tunnel`, `Kaleido`, `Echo` (MilkDrop-style 8-bit feedback trails), and `Type` (Editorial Reels montage with 3D camera transitions and ambient cover backdrop).
-- **Auto VJ Mode**: Automatically cycles scenes on bass drops (when live audio is active) or on a timer using an 8-bit Bayer diamond wipe.
-- **Album Cover Palette**: Extracts dominant colors from the active Spotify track cover and smoothly transitions scene lighting and typography (plus 4 manual 8-bit presets: `Game Boy`, `Sunset`, `Cyber`, `Crimson`).
-- **Live Audio Reactivity**: Supports both browser tab/system audio capture (`A`) and microphone input (`M`) with adjustable sensitivity (`Gain`).
-- **Synced Lyrics & 60 FPS Parabolic Bouncing Ball**: Fetches time-coded lyrics from `lrclib.net` with 3 modes (`Kinetic`, `Scroll`, `Off`), an 8-bit/editorial font switch (`F`), and a continuous 60 FPS bouncing orb.
-- **Spotify OAuth PKCE**: Runs entirely in the browser with no backend required, plus a built-in Demo Stage when disconnected.
+## Что внутри
 
-## Quick Start
+- **6 WebGL-сцен**:
+  - `Ocean` — 8-битный закат со сканлайн-солнцем, звёздами, кометами и перспективными волнами.
+  - `Plasma` — 8-битная демосцен-плазма с морфингом волн и интерференционных колец.
+  - `Tunnel` — варп-туннель с плавной сменой сечения (круг → восьмиугольник → квадрат).
+  - `Kaleido` — 8-лучевой пиксельный калейдоскоп в духе *EarthBound*.
+  - `Echo` — 8-битный feedback-шлейф в стиле MilkDrop на двойном ping-pong буфере.
+  - `Type` — сцена в стиле музыкальных Reels: размытая обложка трека на фоне, 6 монтажных композиций, 3D-переходы камеры (*Fly-Through*, *Whip-Pan*, *Drop*), контурный «призрак» главного слова и фокусировка слов из размытия.
+- **Auto VJ и переходы**: автоматическая смена сцен по дропам баса или по таймеру через 8-битный `Bayer Diamond Wipe`, плюс пиксельная ударная волна по клику и на дропах.
+- **Палитра из обложки**: цвета сцены, текста и акцентов плавно перетекают под обложку текущего трека (плюс 4 ручных пресета в панели настроек: `Game Boy`, `Sunset`, `Cyber`, `Crimson`).
+- **Реакция на реальный звук**: захват чистого звука вкладки/системы (`A`) или микрофона (`M`) с настройкой чувствительности (`Gain 0.5x–2.5x`).
+- **Субтитры и 60 FPS шарик**: синхронизированные тексты из [LRCLIB](https://lrclib.net), 3 режима (`Кинетические`, `Скролл на 3 строки`, `Выкл`), переключатель 8-битного/журнального шрифта (`F`) и плавный параболический шарик, приземляющийся на слова ровно в такт.
+- **Spotify OAuth PKCE без бэкенда**: работает прямо в браузере, а до подключения аккаунта доступен встроенный Demo-режим.
+
+| 8-битный `Tunnel` + аркадный титр смены трека | Сцена `Type` в 3D-наклоне (`shot-3d-tilt`) |
+| :---: | :---: |
+| ![Tunnel и аркадный титр](./docs/screenshots/tunnel-title-card.png) | ![Type 3D-наклон](./docs/screenshots/type-3d-tilt.png) |
+
+## Быстрый запуск
 
 ```bash
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open `http://127.0.0.1:5173/` in your browser.
+Откройте в браузере **`http://127.0.0.1:5173/`**.
 
-### Connecting Spotify
+### Подключение Spotify
 
-1. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and enable **Web API**.
-2. Add `http://127.0.0.1:5173/` to **Redirect URIs**.
-3. Click **Подключить Spotify** in the app and paste your **Client ID**.
+1. Создайте приложение в [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) и отметьте **Web API**.
+2. В поле **Redirect URIs** добавьте:
+   ```text
+   http://127.0.0.1:5173/
+   ```
+3. Нажмите **«Подключить Spotify»** в интерфейсе и вставьте ваш **Client ID**.
 
-## Shortcuts
+## Горячие клавиши
 
-| Key | Action |
+| Клавиша | Действие |
 | --- | --- |
-| `0` | Auto VJ |
-| `1`–`6` | Switch scenes (`Ocean`, `Plasma`, `Tunnel`, `Kaleido`, `Echo`, `Type`) |
-| `Space` | Play / Pause |
-| `A` | Capture tab / system audio |
-| `M` | Toggle microphone |
-| `L` | Cycle lyrics mode (`Kinetic` / `Scroll` / `Off`) |
-| `F` | Toggle 8-bit / serif lyric font |
-| `G` | Open palette & audio gain panel |
-| `S` | Save PNG poster |
-| `H` | Pin / auto-hide HUD |
+| `0` | Режим `Auto VJ` |
+| `1`–`6` | Переключение сцен (`Ocean`, `Plasma`, `Tunnel`, `Kaleido`, `Echo`, `Type`) |
+| `Space` | Пауза / воспроизведение |
+| `A` | Захват звука вкладки / системы |
+| `M` | Микрофон |
+| `L` | Режим субтитров (`Кинетические` → `Скролл` → `Выкл`) |
+| `F` | Переключить 8-битный / журнальный шрифт лирики |
+| `G` | Панель палитр, усиления звука (`Gain`) и шарика |
+| `S` | Сохранить арт-постер в PNG |
+| `H` | Закрепить / скрыть HUD |
+
+## Стек
+
+React 19, TypeScript, Vite, Three.js (кастомные GLSL-шейдеры), Web Audio API, Spotify Web API (OAuth 2.0 PKCE), LRCLIB API.
+
+## Лицензия
+
+[MIT](./LICENSE)
