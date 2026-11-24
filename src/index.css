@@ -168,7 +168,21 @@ body,
   will-change: transform, opacity;
 }
 
-/* 3 distinct camera transition styles */
+/* 5 distinct camera transition styles (including 3D Cube Flip & Cinematic Roll) */
+.reels-shot.is-entering.cam-flip-3d {
+  animation: reelsFlip3DIn 0.52s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.reels-shot.is-exiting.cam-flip-3d {
+  animation: reelsFlip3DOut 0.48s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.reels-shot.is-entering.cam-roll-3d {
+  animation: reelsRoll3DIn 0.54s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.reels-shot.is-exiting.cam-roll-3d {
+  animation: reelsRoll3DOut 0.48s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
 .reels-shot.is-entering.cam-fly {
   animation: reelsCamIn 0.52s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -310,6 +324,43 @@ body,
     0 0 calc(16px + var(--beat, 0) * 32px) color-mix(in srgb, var(--reel-accent) 75%, transparent);
 }
 
+/* Elastic 360° 3D flip when the hero word becomes active */
+.reels-word-mask.is-hero.is-active .reels-word-inner {
+  animation: heroWordFlip3D 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-style: preserve-3d;
+}
+
+/* 7th Montage Shot: Mirror Echo (The Weeknd / Billie Eilish split echo layers) */
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero {
+  overflow: visible;
+}
+
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero .reels-word-inner {
+  position: relative;
+}
+
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero .reels-word-inner::before,
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero .reels-word-inner::after {
+  content: attr(data-word);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  pointer-events: none;
+  color: transparent;
+  -webkit-text-stroke: 1px color-mix(in srgb, var(--reel-accent) 55%, rgba(255, 255, 255, 0.35));
+  opacity: 0.45;
+  transition: transform 0.1s linear;
+}
+
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero .reels-word-inner::before {
+  transform: translateY(calc(-16px - var(--beat, 0) * 18px));
+}
+
+.reels-shot.shot-mirror-echo .reels-word-mask.is-hero .reels-word-inner::after {
+  transform: translateY(calc(16px + var(--beat, 0) * 18px));
+}
+
 /* 6 Montage Shot Compositions */
 .reels-shot.shot-staircase .reels-words {
   flex-direction: column;
@@ -384,6 +435,70 @@ body,
   }
   100% {
     transform: translateY(0%);
+  }
+}
+
+@keyframes reelsFlip3DIn {
+  0% {
+    opacity: 0;
+    transform: rotateX(-82deg) translateY(4vh) scale(0.92);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateX(0deg) translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes reelsFlip3DOut {
+  0% {
+    opacity: 0.9;
+    transform: rotateX(0deg) translateY(0) scale(1);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: rotateX(82deg) translateY(-4vh) scale(0.92);
+    filter: blur(5px);
+  }
+}
+
+@keyframes reelsRoll3DIn {
+  0% {
+    opacity: 0;
+    transform: rotateZ(-14deg) rotateY(28deg) scale(0.88);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateZ(0deg) rotateY(0deg) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes reelsRoll3DOut {
+  0% {
+    opacity: 0.9;
+    transform: rotateZ(0deg) rotateY(0deg) scale(1);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: rotateZ(12deg) rotateY(-26deg) scale(1.12);
+    filter: blur(6px);
+  }
+}
+
+@keyframes heroWordFlip3D {
+  0% {
+    transform: rotateX(0deg) scale(1);
+  }
+  45% {
+    transform: rotateX(195deg) scale(1.08);
+  }
+  100% {
+    transform: rotateX(360deg) scale(1);
   }
 }
 

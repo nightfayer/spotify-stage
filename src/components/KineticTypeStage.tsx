@@ -13,6 +13,7 @@ interface KineticTypeStageProps {
 
 const SHOT_STYLES = [
   'shot-hero-italic',
+  'shot-mirror-echo',
   'shot-staircase',
   'shot-marker-pop',
   'shot-3d-tilt',
@@ -20,7 +21,7 @@ const SHOT_STYLES = [
   'shot-editorial-right',
 ] as const;
 
-const CAM_MODES = ['cam-fly', 'cam-whip', 'cam-drop'] as const;
+const CAM_MODES = ['cam-flip-3d', 'cam-fly', 'cam-roll-3d', 'cam-whip', 'cam-drop'] as const;
 
 interface ShotSnapshot {
   key: string;
@@ -196,7 +197,9 @@ export function KineticTypeStage({
                 className={`reels-word-mask ${isHero ? 'is-hero' : ''} ${stateClass}`}
                 style={{ '--word-i': wIdx } as React.CSSProperties}
               >
-                <span className="reels-word-inner">{word}</span>
+                <span className="reels-word-inner" data-word={word}>
+                  {word}
+                </span>
               </span>
             );
           })}
