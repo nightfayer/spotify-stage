@@ -315,13 +315,47 @@ body,
   filter: blur(0px);
 }
 
+/* Apple Music Sing-style 60 FPS liquid karaoke fill on active word */
 .reels-word-mask.is-active .reels-word-inner {
   opacity: 1;
   filter: blur(0px);
-  color: var(--reel-accent);
-  text-shadow:
-    0 6px 26px rgba(0, 0, 0, 0.55),
-    0 0 calc(16px + var(--beat, 0) * 32px) color-mix(in srgb, var(--reel-accent) 75%, transparent);
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--reel-accent) 0%,
+    var(--reel-accent) var(--word-fill, 100%),
+    color-mix(in srgb, var(--reel-primary) 35%, rgba(255, 255, 255, 0.52))
+      calc(var(--word-fill, 100%) + 16%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.45))
+    drop-shadow(0 0 calc(8px + var(--beat, 0) * 18px) color-mix(in srgb, var(--reel-accent) 60%, transparent));
+}
+
+/* Impact Shot for punchy 1-2 word hooks & exclamations */
+.reels-shot.shot-impact-hook .reels-word-inner {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: clamp(3rem, 8.2vw, 7.2rem);
+  letter-spacing: 0.04em;
+  line-height: 1.05;
+  animation: impactHookIn 0.44s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes impactHookIn {
+  0% {
+    opacity: 0;
+    transform: scale(1.26);
+    letter-spacing: 0.16em;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    letter-spacing: 0.04em;
+  }
 }
 
 /* Elastic 360° 3D flip when the hero word becomes active */
@@ -392,7 +426,11 @@ body,
 /* Keep high contrast when hero word inside marker-pop is also the active word */
 .reels-shot.shot-marker-pop .reels-word-mask.is-hero.is-active .reels-word-inner {
   background: #fff;
+  background-image: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
   color: #090d16;
+  filter: none;
   box-shadow: 0 0 calc(14px + var(--beat, 0) * 24px) var(--reel-accent);
 }
 

@@ -16,11 +16,13 @@ interface BouncingBallProps {
   wordSelector: string;
   pixelStyle?: boolean;
   topOffset?: number;
+  visible?: boolean;
 }
 
 interface WordPoint {
   x: number;
   y: number;
+  el: HTMLElement;
 }
 
 export function BouncingBall({
@@ -33,6 +35,7 @@ export function BouncingBall({
   wordSelector,
   pixelStyle = false,
   topOffset = -10,
+  visible = true,
 }: BouncingBallProps) {
   const ballRef = useRef<HTMLSpanElement | null>(null);
   const pointsRef = useRef<WordPoint[]>([]);
@@ -47,6 +50,7 @@ export function BouncingBall({
         pts.push({
           x: node.offsetLeft + node.offsetWidth / 2,
           y: node.offsetTop + topOffset,
+          el: node,
         });
       });
       pointsRef.current = pts;
@@ -69,9 +73,8 @@ export function BouncingBall({
     let rafId = 0;
     const step = () => {
       rafId = requestAnimationFrame(step);
-      const el = ballRef.current;
       const pts = pointsRef.current;
-      if (!el || pts.length === 0) return;
+      if (pts.length === 0) return;
 
       const clock = clockRef.current;
       const liveMs = clock.isPlaying
@@ -83,23 +86,32 @@ export function BouncingBall({
       const progress = Math.min(1, elapsed / span);
       const count = Math.min(pts.length, Math.max(1, wordCount));
 
-      // Continuous float position along the words [0 .. count - 1]
-      const wordFloat = Math.min(count - 1, progress * count);
+      // Continuous float position along the words [0 .. count]
+      const rawFloat = progress * count;
+      const wordFloat = Math.min(count - 1, rawFloat);
       const i = Math.floor(wordFloat);
       const next = Math.min(count - 1, i + 1);
       const f = wordFloat - i;
+
+      // Drive 60 FPS Apple Music Sing-style liquid fill (--word-fill) on each word
+      const activeFill = i === count - 1 ? Math.min(1, rawFloat - i) : f;
+      for (let k = 0; k < count; k++) {
+        const fillPct = k < i ? 100 : k > i ? 0 : Math.round(activeFill * 100);
+        pts[k].el.style.setProperty('--word-fill', `${fillPct}%`);
+      }
+
+      const el = ballRef.current;
+      if (!el || !visible) return;
 
       const p0 = pts[i];
       const p1 = pts[next];
 
       const x = p0.x + (p1.x - p0.x) * f;
-      // True gravity parabola: 4*f*(1-f) peaks at 1.0 at midpoint, 0.0 at landing
       const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
       const arcHeight = i === next ? 0 : Math.min(46, Math.max(22, dist * 0.22));
       const arc = 4 * f * (1 - f) * arcHeight;
       const y = p0.y + (p1.y - p0.y) * f - arc;
 
-      // Smooth continuous squash at landing (f ~ 0 or f ~ 1), slight vertical stretch at apex
       const edgeDist = Math.min(f, 1 - f);
       const squash = i === next ? 0 : Math.pow(Math.max(0, 1 - edgeDist * 6.5), 2);
       const apex = i === next ? 0 : 4 * f * (1 - f);
@@ -126,9 +138,12 @@ export function BouncingBall({
     lineStartMs,
     pixelStyle,
     topOffset,
+    visible,
     wordCount,
     wordSelector,
   ]);
+
+  if (!visible) return null;
 
   return (
     <span

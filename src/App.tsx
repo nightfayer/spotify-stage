@@ -569,18 +569,17 @@ export function App() {
           }
         >
           <p ref={lyricWordsRef} className="lyric-line-rel">
-            {bouncingBall && (
-              <BouncingBall
-                containerRef={lyricWordsRef}
-                clockRef={playbackClockRef}
-                lineStartMs={activeLyric.lineStartMs}
-                lineDurationMs={activeLyric.lineDurationMs}
-                wordCount={activeLyric.words.length}
-                lineKey={`${track.id}-${activeLyric.index}`}
-                wordSelector=".lyric-word"
-                pixelStyle={pixelFont}
-              />
-            )}
+            <BouncingBall
+              containerRef={lyricWordsRef}
+              clockRef={playbackClockRef}
+              lineStartMs={activeLyric.lineStartMs}
+              lineDurationMs={activeLyric.lineDurationMs}
+              wordCount={activeLyric.words.length}
+              lineKey={`${track.id}-${activeLyric.index}`}
+              wordSelector=".lyric-word"
+              pixelStyle={pixelFont}
+              visible={bouncingBall}
+            />
             {activeLyric.words.map((word, wIdx) => {
               const cls =
                 wIdx === activeLyric.activeWordIndex
@@ -618,18 +617,17 @@ export function App() {
             className="scroll-line is-current lyric-line-rel"
             key={`scroll-${track.id}-${activeLyric.index}`}
           >
-            {bouncingBall && (
-              <BouncingBall
-                containerRef={lyricWordsRef}
-                clockRef={playbackClockRef}
-                lineStartMs={activeLyric.lineStartMs}
-                lineDurationMs={activeLyric.lineDurationMs}
-                wordCount={activeLyric.words.length}
-                lineKey={`scroll-${track.id}-${activeLyric.index}`}
-                wordSelector=".lyric-word"
-                pixelStyle={pixelFont}
-              />
-            )}
+            <BouncingBall
+              containerRef={lyricWordsRef}
+              clockRef={playbackClockRef}
+              lineStartMs={activeLyric.lineStartMs}
+              lineDurationMs={activeLyric.lineDurationMs}
+              wordCount={activeLyric.words.length}
+              lineKey={`scroll-${track.id}-${activeLyric.index}`}
+              wordSelector=".lyric-word"
+              pixelStyle={pixelFont}
+              visible={bouncingBall}
+            />
             {activeLyric.words.map((word, wIdx) => {
               const cls =
                 wIdx === activeLyric.activeWordIndex

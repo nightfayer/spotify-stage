@@ -23,13 +23,15 @@ const SHOT_STYLES = [
 
 const CAM_MODES = ['cam-flip-3d', 'cam-fly', 'cam-roll-3d', 'cam-whip', 'cam-drop'] as const;
 
+type ShotClass = (typeof SHOT_STYLES)[number] | 'shot-impact-hook';
+
 interface ShotSnapshot {
   key: string;
   index: number;
   words: string[];
   heroWordIdx: number;
   heroWord: string;
-  shotClass: (typeof SHOT_STYLES)[number];
+  shotClass: ShotClass;
   camClass: (typeof CAM_MODES)[number];
 }
 
@@ -63,8 +65,10 @@ export function KineticTypeStage({
         : track.title.split(/\s+/).filter(Boolean);
     const idx = activeLyric ? activeLyric.index : 0;
     const heroWordIdx = pickHeroWordIndex(words);
-    let shotClass = SHOT_STYLES[idx % SHOT_STYLES.length];
-    if (shotClass === 'shot-staircase' && words.length > 6) {
+    let shotClass: ShotClass = SHOT_STYLES[idx % SHOT_STYLES.length];
+    if (words.length <= 2 || (activeLyric?.text.endsWith('!') && words.length <= 4)) {
+      shotClass = 'shot-impact-hook';
+    } else if (shotClass === 'shot-staircase' && words.length > 6) {
       shotClass = 'shot-hero-italic';
     }
     return {
@@ -171,7 +175,7 @@ export function KineticTypeStage({
         key={`curr-${currentShot.key}`}
       >
         <div className="reels-words" ref={wordsContainerRef}>
-          {showBall && activeLyric && (
+          {activeLyric && (
             <BouncingBall
               containerRef={wordsContainerRef}
               clockRef={clockRef}
@@ -181,6 +185,7 @@ export function KineticTypeStage({
               lineKey={currentShot.key}
               wordSelector=".reels-word-mask"
               topOffset={6}
+              visible={showBall}
             />
           )}
           {currentShot.words.map((word, wIdx) => {
