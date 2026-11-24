@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { boxesOverlap, layoutLineInWorld } from '../kineticLayout';
 import {
   buildPlainLyrics,
   cleanTrackTitle,
@@ -89,5 +90,31 @@ describe('palette utilities', () => {
     expect(resolveBiomeForGenres(['metal', 'rock'])).toBe('pixel-plasma');
     expect(resolveBiomeForGenres(['synthwave', 'techno'])).toBe('pixel-tunnel');
     expect(resolveBiomeForGenres(['classical'])).toBe('pixel-kaleido');
+  });
+});
+
+describe('kinetic 2D camera layout (zero overlap guarantee)', () => {
+  it('places short and long English & Russian lines with zero AABB collisions across all rotation patterns', () => {
+    const sampleLines = [
+      ['tell', 'me', 'what', 'you', 'want', 'what', 'you', 'like'],
+      ['я', 'чувствую', 'прикосновение', 'бесконечности', 'в', 'этой', 'ночи'],
+      ['im', 'a', 'little', 'curious', 'too!'],
+      ['невероятно', 'громкий', 'припев', 'разрывает', 'тишину', 'вокруг', 'нас'],
+    ];
+
+    for (let lineIdx = 0; lineIdx < 8; lineIdx++) {
+      const words = sampleLines[lineIdx % sampleLines.length];
+      const placed = layoutLineInWorld(words, lineIdx, 'test-track');
+      expect(placed).toHaveLength(words.length);
+
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          expect(
+            boxesOverlap(placed[i].box, placed[j].box, 0),
+            `Overlap detected on line ${lineIdx} between "${placed[i].word}" and "${placed[j].word}"`
+          ).toBe(false);
+        }
+      }
+    }
   });
 });

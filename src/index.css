@@ -1820,56 +1820,266 @@ body,
   transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
 }
 
-/* Word Lift + Subtle Chromatic Kick on Active Word (zero JS overhead, driven by --beat) */
+/* Clean Word Lift on Active Word (zero JS overhead, driven by --beat) */
 .lyric-word.is-active-word {
   display: inline-block;
-  transform: translate3d(0, calc(-3px - var(--beat, 0) * 4px), 0) scale(calc(1.02 + var(--beat, 0) * 0.04));
-  text-shadow:
-    calc(var(--beat, 0) * -2.2px) 0 0 color-mix(in srgb, var(--lyric-primary, #38bdf8) 55%, transparent),
-    calc(var(--beat, 0) * 2.2px) 0 0 color-mix(in srgb, var(--lyric-accent, #fde047) 55%, transparent),
-    0 6px 24px rgba(0, 0, 0, 0.55);
+  transform: translate3d(0, calc(-2px - var(--beat, 0) * 3px), 0) scale(calc(1.01 + var(--beat, 0) * 0.03));
   transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.reels-word-mask.is-active .reels-word-inner {
-  transform: translate3d(0, calc(-2px - var(--beat, 0) * 5px), 0);
-  text-shadow:
-    calc(var(--beat, 0) * -2.5px) 0 0 color-mix(in srgb, var(--reel-primary, #38bdf8) 45%, transparent),
-    calc(var(--beat, 0) * 2.5px) 0 0 color-mix(in srgb, var(--reel-accent, #fde047) 45%, transparent);
 }
 
 /* Variable Font Beat Breathing for Brutal (Unbounded) */
 .is-brutal-font .lyric-word.is-active-word,
-.font-brutal .reels-word-mask.is-active .reels-word-inner {
-  font-variation-settings: 'wght' calc(680 + var(--beat, 0) * 220);
+.font-brutal .ae-world-word.is-active .ae-world-word-text {
+  font-variation-settings: 'wght' calc(700 + var(--beat, 0) * 200);
 }
 
-/* New Type Scene Shot: Neon Highlighter Fill (driven by 60 FPS --word-fill) */
-.reels-shot.shot-highlighter .reels-words {
+/* ==========================================================================
+   After Effects Continuous 2D Camera Kinetic Typography Stage (Type Scene)
+   ========================================================================== */
+.ae-canvas-stage {
+  transition: background-color 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ae-canvas-stage.is-dark {
+  background: #050507;
+  --ae-ink: var(--reel-primary);
+  --ae-ink-strong: var(--reel-accent);
+}
+
+.ae-canvas-stage.is-inverted {
+  background: var(--reel-primary);
+  --ae-ink: #070709;
+  --ae-ink-strong: #050507;
+}
+
+.ae-canvas-stage.is-inverted .reels-frame-meta {
+  color: rgba(7, 7, 9, 0.72);
+}
+
+.ae-canvas-stage.is-inverted .reels-music-pill {
+  background: rgba(7, 7, 9, 0.12);
+  border-color: rgba(7, 7, 9, 0.22);
+  color: #070709;
+}
+
+.ae-canvas-stage.is-inverted .reels-live-dot {
+  background: #070709;
+  box-shadow: none;
+}
+
+.ae-canvas-stage.is-inverted .reels-top-progress {
+  background: rgba(7, 7, 9, 0.14);
+}
+
+.ae-canvas-stage.is-inverted .reels-top-progress-fill {
+  background: #070709;
+  box-shadow: none;
+}
+
+/* Keep bottom HUD crisp and high-contrast when Type scene flips to bright inverted color */
+.stage-root:has(.ae-canvas-stage.is-inverted) .now-playing-card,
+.stage-root:has(.ae-canvas-stage.is-inverted) .control-dock,
+.stage-root:has(.ae-canvas-stage.is-inverted) .tune-popover {
+  background: rgba(9, 11, 16, 0.86);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.ae-camera-viewport {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 0.22em 0.34em;
+  pointer-events: none;
 }
 
-.reels-shot.shot-highlighter .reels-word-mask {
-  padding: 0.04em 0.2em;
-  border-radius: 6px;
-  background-image: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--reel-accent) 88%, transparent) var(--word-fill, 0%),
-    rgba(255, 255, 255, 0.06) var(--word-fill, 0%)
-  );
-  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+/* The 2D world origin sits at screen center; camera translates/rotates/zooms to each active word */
+.ae-camera-rig {
+  position: relative;
+  width: 0;
+  height: 0;
+  will-change: transform;
+  transform:
+    scale(calc(var(--cam-zoom, 1) + var(--beat, 0) * 0.045))
+    rotate(calc(var(--cam-rot, 0) * -1deg))
+    translate3d(calc(var(--cam-x, 0) * -1px), calc(var(--cam-y, 0) * -1px), 0);
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.reels-shot.shot-highlighter .reels-word-mask.is-active,
-.reels-shot.shot-highlighter .reels-word-mask.is-spoken {
-  color: #090d16;
+.ae-world-word {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  transform-origin: 50% 50%;
+  transform: translate(-50%, -50%) translate3d(var(--wx, 0px), var(--wy, 0px), 0) rotate(var(--wrot, 0deg));
+  will-change: transform, opacity;
 }
 
-.reels-shot.shot-highlighter .reels-word-mask.is-active .reels-word-inner,
-.reels-shot.shot-highlighter .reels-word-mask.is-spoken .reels-word-inner {
-  background: none;
-  -webkit-text-fill-color: #090d16;
-  color: #090d16;
-  text-shadow: none;
+.ae-world-word-text {
+  display: inline-block;
+  font-family: 'Manrope', 'Helvetica Neue', 'Inter', -apple-system, sans-serif;
+  font-size: var(--wsize, 80px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.94;
+  text-transform: lowercase;
+  color: var(--ae-ink);
+  transform-origin: center center;
+  transition:
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s ease,
+    color 0.16s ease;
+}
+
+/* Typographic Contrast Mix matching the reference video (Tight Neo-Grotesk / Hollow Outline / High-Contrast Serif / Rounded Bold Hero) */
+.ae-world-word.variant-outline .ae-world-word-text {
+  font-family: 'Manrope', 'Helvetica Neue', sans-serif;
+  color: transparent;
+  -webkit-text-stroke: 2.4px var(--ae-ink);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.ae-world-word.variant-serif .ae-world-word-text {
+  font-family: 'Playfair Display', 'Instrument Serif', Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+}
+
+.ae-world-word.variant-hero .ae-world-word-text {
+  font-family: 'Rubik', 'Manrope', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 0.94;
+}
+
+/* Keep the authentic video font pairing in Type scene even when global Pixel/Brutal font is active */
+.ae-canvas-stage.font-pixel .ae-world-word .ae-world-word-text,
+.ae-canvas-stage.font-brutal .ae-world-word .ae-world-word-text {
+  font-variation-settings: normal;
+}
+
+/* Word visibility lifecycle: hidden until sung -> punch in -> stay cleanly visible in world space */
+.ae-world-word.is-upcoming .ae-world-word-text {
+  opacity: 0;
+  transform: scale(0.72) translate3d(0, 22px, 0);
+}
+
+.ae-world-word.is-spoken .ae-world-word-text {
+  opacity: 0.78;
+  transform: scale(0.97);
+}
+
+.ae-world-word.is-spoken-far .ae-world-word-text {
+  opacity: 0.38;
+  transform: scale(0.95);
+}
+
+.ae-world-word.is-active .ae-world-word-text {
+  opacity: 1;
+  color: var(--ae-ink-strong);
+  transform: scale(calc(1.03 + var(--beat, 0) * 0.04));
+}
+
+.ae-world-word.variant-outline.is-active .ae-world-word-text {
+  color: transparent;
+  -webkit-text-stroke: 2.8px var(--ae-ink-strong);
+}
+
+/* Signature 00:00 Reference Video Intro / Interlude Pulsing Circle */
+.ae-intro-circle-wrap {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.ae-intro-circle {
+  width: clamp(96px, 14vw, 152px);
+  height: clamp(96px, 14vw, 152px);
+  border-radius: 50%;
+  background: var(--reel-primary);
+  transform: scale(calc(0.92 + var(--beat, 0) * 0.24));
+  box-shadow: 0 0 calc(20px + var(--beat, 0) * 34px) color-mix(in srgb, var(--reel-primary) 55%, transparent);
+  animation: aeCircleBreathe 1.9s ease-in-out infinite;
+  will-change: transform;
+}
+
+@keyframes aeCircleBreathe {
+  0%, 100% {
+    opacity: 0.88;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Seamless cross-line outgoing echo (whips away cleanly in 240ms) */
+.ae-line-echo {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: aeLineEchoOut 0.24s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+@keyframes aeLineEchoOut {
+  0% {
+    opacity: 0.55;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -86%) scale(1.16);
+  }
+}
+
+/* Elastic After Effects Squash & Stretch punch on each active word */
+.ae-world-word.is-active .ae-world-word-text {
+  animation: aeWordSquash 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes aeWordSquash {
+  0% {
+    transform: scale(0.78, 1.12) translate3d(0, 14px, 0);
+  }
+  55% {
+    transform: scale(1.07, 0.94) translate3d(0, -2px, 0);
+  }
+  100% {
+    transform: scale(calc(1.03 + var(--beat, 0) * 0.04));
+  }
+}
+
+/* Crisp animated underline accent on exclamations & questions (! / ?) */
+.ae-world-word.has-accent-mark.is-active .ae-world-word-text {
+  position: relative;
+}
+
+.ae-world-word.has-accent-mark.is-active .ae-world-word-text::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--ae-ink-strong);
+  transform-origin: left center;
+  animation: aeAccentStrike 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes aeAccentStrike {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }

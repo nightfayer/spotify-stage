@@ -1,7 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { layoutLineInWorld, type WordVariant } from '../lib/kineticLayout';
 import type { ActiveLyricState } from '../lib/lyrics';
+import { boostVibrantColor } from '../lib/palette';
 import type { FontStyleMode, TrackState } from '../types';
-import { BouncingBall, type PlaybackClock } from './BouncingBall';
+import type { PlaybackClock } from './BouncingBall';
 
 interface KineticTypeStageProps {
   track: TrackState;
@@ -14,44 +16,9 @@ interface KineticTypeStageProps {
   lyricOffsetMs: number;
 }
 
-const SHOT_STYLES = [
-  'shot-hero-italic',
-  'shot-outline-fill',
-  'shot-highlighter',
-  'shot-mirror-echo',
-  'shot-staircase',
-  'shot-marker-pop',
-  'shot-3d-tilt',
-  'shot-split-wide',
-  'shot-editorial-right',
-] as const;
-
-const CAM_MODES = ['cam-flip-3d', 'cam-fly', 'cam-roll-3d', 'cam-whip', 'cam-drop'] as const;
-
-type ShotClass = (typeof SHOT_STYLES)[number] | 'shot-impact-hook';
-
-interface ShotSnapshot {
-  key: string;
-  index: number;
-  words: string[];
-  heroWordIdx: number;
-  heroWord: string;
-  shotClass: ShotClass;
-  camClass: (typeof CAM_MODES)[number];
-}
-
-function pickHeroWordIndex(words: string[]): number {
-  if (words.length <= 1) return 0;
-  let bestIdx = 0;
-  let bestLen = 0;
-  for (let i = 0; i < words.length; i++) {
-    const cleanLen = words[i].replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '').length;
-    if (cleanLen >= bestLen) {
-      bestLen = cleanLen;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
+function getViewportScale(): number {
+  if (typeof window === 'undefined') return 1;
+  return Number(Math.min(1.3, Math.max(0.55, window.innerWidth / 1280)).toFixed(3));
 }
 
 export const KineticTypeStage = memo(function KineticTypeStage({
@@ -64,10 +31,27 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   fontStyle,
   lyricOffsetMs,
 }: KineticTypeStageProps) {
-  const wordsContainerRef = useRef<HTMLDivElement | null>(null);
+  void showBall;
+  void lyricOffsetMs;
   const topProgressFillRef = useRef<HTMLDivElement | null>(null);
+  const [fontsLoadedTick, setFontsLoadedTick] = useState(0);
+  const [viewportScale, setViewportScale] = useState(getViewportScale);
 
-  // Smooth 60+ FPS GPU-composited top progress bar driven directly from clockRef (zero React re-renders)
+  // Re-measure word widths once web fonts (Manrope / Playfair / Rubik) finish loading
+  useEffect(() => {
+    let cancelled = false;
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) setFontsLoadedTick((n) => n + 1);
+    });
+    const onResize = () => setViewportScale(getViewportScale());
+    window.addEventListener('resize', onResize, { passive: true });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  // Smooth 60+ FPS GPU-composited top progress bar driven directly from clockRef
   useEffect(() => {
     let rafId = 0;
     const duration = Math.max(1, track.durationMs);
@@ -86,84 +70,110 @@ export const KineticTypeStage = memo(function KineticTypeStage({
     return () => cancelAnimationFrame(rafId);
   }, [clockRef, track.durationMs]);
 
-  const currentShot = useMemo<ShotSnapshot>(() => {
-    const words =
-      activeLyric && activeLyric.words.length > 0
-        ? activeLyric.words
-        : track.title.split(/\s+/).filter(Boolean);
-    const idx = activeLyric ? activeLyric.index : 0;
-    const heroWordIdx = pickHeroWordIndex(words);
-    let shotClass: ShotClass = SHOT_STYLES[idx % SHOT_STYLES.length];
-    if (words.length <= 2 || (activeLyric?.text.endsWith('!') && words.length <= 4)) {
-      shotClass = 'shot-impact-hook';
-    } else if (shotClass === 'shot-staircase' && words.length > 6) {
-      shotClass = 'shot-hero-italic';
-    }
-    return {
-      key: `${track.id}-${idx}-${words.join('_')}`,
-      index: idx,
-      words,
-      heroWordIdx,
-      heroWord: words[heroWordIdx] ?? '',
-      shotClass,
-      camClass: CAM_MODES[idx % CAM_MODES.length],
-    };
-  }, [activeLyric, track.id, track.title]);
+  const lineIndex = activeLyric ? activeLyric.index : 0;
+  const words = useMemo(() => {
+    if (activeLyric && activeLyric.words.length > 0) return activeLyric.words;
+    return track.title.split(/\s+/).filter(Boolean);
+  }, [activeLyric, track.title]);
 
-  const [exitingShot, setExitingShot] = useState<ShotSnapshot | null>(null);
-  const prevShotRef = useRef<ShotSnapshot>(currentShot);
+  const placedWords = useMemo(() => {
+    void fontsLoadedTick;
+    return layoutLineInWorld(words, lineIndex, track.id);
+  }, [fontsLoadedTick, lineIndex, track.id, words]);
+
+  const activeWordIdx = activeLyric
+    ? Math.min(placedWords.length - 1, Math.max(0, activeLyric.activeWordIndex))
+    : placedWords.length - 1;
+
+  const focusWord = placedWords[activeWordIdx] ?? placedWords[0];
+
+  // Seamless cross-line continuity: keep the outgoing line's last word whipping away for 250ms
+  const lineKey = `${track.id}-${lineIndex}`;
+  const [exitingEcho, setExitingEcho] = useState<{
+    key: string;
+    word: string;
+    variant: WordVariant;
+    fontSize: number;
+  } | null>(null);
+  const prevLineRef = useRef<{
+    key: string;
+    word: string;
+    variant: WordVariant;
+    fontSize: number;
+  }>({
+    key: lineKey,
+    word: focusWord?.word ?? '',
+    variant: focusWord?.variant ?? 'solid',
+    fontSize: focusWord?.fontSize ?? 80,
+  });
 
   useEffect(() => {
-    if (prevShotRef.current.key !== currentShot.key) {
-      const leaving = prevShotRef.current;
-      prevShotRef.current = currentShot;
-      setExitingShot(leaving);
-      const timer = window.setTimeout(() => setExitingShot(null), 520);
-      return () => window.clearTimeout(timer);
+    if (prevLineRef.current.key !== lineKey) {
+      const leaving = prevLineRef.current;
+      if (leaving.word) {
+        setExitingEcho(leaving);
+        const t = window.setTimeout(() => setExitingEcho(null), 260);
+        prevLineRef.current = {
+          key: lineKey,
+          word: focusWord?.word ?? '',
+          variant: focusWord?.variant ?? 'solid',
+          fontSize: focusWord?.fontSize ?? 80,
+        };
+        return () => window.clearTimeout(t);
+      }
     }
-  }, [currentShot]);
+    if (focusWord) {
+      prevLineRef.current = {
+        key: lineKey,
+        word: focusWord.word,
+        variant: focusWord.variant,
+        fontSize: focusWord.fontSize,
+      };
+    }
+  }, [focusWord, lineKey]);
 
-  const activeWordIdx = activeLyric ? activeLyric.activeWordIndex : currentShot.words.length - 1;
+  const vibrantPrimary = useMemo(
+    () => boostVibrantColor(track.palette.primary),
+    [track.palette.primary]
+  );
+
+  // High-contrast After Effects color inversion flip every 2 lines (Dark/Color <-> Color/Black)
+  const isInverted = !isInterlude && Math.floor(lineIndex / 2) % 2 === 1;
+
+  const cameraStyle = useMemo(
+    () =>
+      ({
+        '--cam-x': focusWord ? focusWord.x : 0,
+        '--cam-y': focusWord ? focusWord.y : 0,
+        '--cam-rot': focusWord ? focusWord.rot : 0,
+        '--cam-zoom': focusWord ? Number((focusWord.zoom * viewportScale).toFixed(3)) : viewportScale,
+      }) as React.CSSProperties,
+    [focusWord, viewportScale]
+  );
 
   return (
     <div
       ref={beatRef}
-      className={`reels-type-stage font-${fontStyle}`}
+      className={`reels-type-stage ae-canvas-stage font-${fontStyle} ${isInverted ? 'is-inverted' : 'is-dark'}`}
       style={
         {
-          '--reel-primary': track.palette.primary,
+          '--reel-primary': vibrantPrimary,
           '--reel-secondary': track.palette.secondary,
           '--reel-accent': track.palette.accent,
           '--reel-bg': track.palette.background,
         } as React.CSSProperties
       }
     >
-      {/* Viral Reels / Apple Music ambient blurred album cover backdrop */}
-      {track.coverUrl && (
-        <div
-          className="reels-cover-backdrop"
-          style={{ backgroundImage: `url("${track.coverUrl}")` }}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Razor-thin editorial top progress hairline */}
+      {/* Razor-thin top progress hairline */}
       <div className="reels-top-progress" aria-hidden="true">
         <div ref={topProgressFillRef} className="reels-top-progress-fill" />
       </div>
 
-      {/* Giant outlined ghost watermark tinted by cover primary color */}
-      {currentShot.heroWord && (
-        <div className="reels-ghost-word" key={`ghost-${currentShot.key}`} aria-hidden="true">
-          {currentShot.heroWord}
-        </div>
-      )}
-
-      {/* Subtle Instagram Music / Reels top header pill */}
+      {/* Top header pill (auto-adapts contrast on inverted color background) */}
       <div className="reels-frame-meta" aria-hidden="true">
         <span className="reels-shot-badge">
           <i className="reels-live-dot" />
-          SHOT {String(currentShot.index + 1).padStart(2, '0')}
+          SHOT {String(lineIndex + 1).padStart(2, '0')}
         </span>
 
         <div className="reels-music-pill">
@@ -176,71 +186,50 @@ export const KineticTypeStage = memo(function KineticTypeStage({
         <span>{track.album.toUpperCase()}</span>
       </div>
 
-      {/* Camera Transition exiting shot */}
-      {exitingShot && (
-        <div
-          className={`reels-shot is-exiting ${exitingShot.shotClass} ${exitingShot.camClass}`}
-          key={`exit-${exitingShot.key}`}
-          aria-hidden="true"
-        >
-          <div className="reels-words">
-            {exitingShot.words.map((w, i) => (
-              <span
-                key={`${i}-${w}`}
-                className={`reels-word-mask ${i === exitingShot.heroWordIdx ? 'is-hero' : ''}`}
-              >
-                <span className="reels-word-inner">{w}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Instrumental Interlude Beat Dots OR Active Editorial Montage Shot */}
+      {/* Signature Intro / Interlude Pulsing Circle (like 00:00 of the reference video) OR Continuous 2D Camera */}
       {isInterlude ? (
-        <div className="interlude-dots is-in-type" aria-hidden="true">
-          <span className="interlude-dot" />
-          <span className="interlude-dot" />
-          <span className="interlude-dot" />
+        <div className="ae-intro-circle-wrap" aria-hidden="true">
+          <span className="ae-intro-circle" />
         </div>
       ) : (
-        <div
-          className={`reels-shot is-entering ${currentShot.shotClass} ${currentShot.camClass}`}
-          key={`curr-${currentShot.key}`}
-        >
-          <div className="reels-words" ref={wordsContainerRef}>
-            {activeLyric && (
-              <BouncingBall
-                containerRef={wordsContainerRef}
-                clockRef={clockRef}
-                lineStartMs={activeLyric.lineStartMs}
-                lineDurationMs={activeLyric.lineDurationMs}
-                wordCount={currentShot.words.length}
-                lineKey={currentShot.key}
-                wordSelector=".reels-word-mask"
-                topOffset={6}
-                visible={showBall}
-                lyricOffsetMs={lyricOffsetMs}
-              />
-            )}
-            {currentShot.words.map((word, wIdx) => {
-              const isHero = wIdx === currentShot.heroWordIdx;
-              const stateClass =
-                wIdx === activeWordIdx
-                  ? 'is-active'
-                  : wIdx < activeWordIdx
-                    ? 'is-spoken'
+        <div className="ae-camera-viewport" key={`line-${lineKey}`}>
+          {exitingEcho && (
+            <div
+              className={`ae-line-echo variant-${exitingEcho.variant}`}
+              key={`echo-${exitingEcho.key}`}
+              style={{ '--wsize': `${exitingEcho.fontSize}px` } as React.CSSProperties}
+              aria-hidden="true"
+            >
+              <span className="ae-world-word-text">{exitingEcho.word}</span>
+            </div>
+          )}
+          <div className="ae-camera-rig" style={cameraStyle}>
+            {placedWords.map((item) => {
+              const isActive = item.wordIndex === activeWordIdx;
+              const age = activeWordIdx - item.wordIndex;
+              const hasPunctuation = /[!?]$/.test(item.word);
+              const stateCls = isActive
+                ? 'is-active'
+                : age === 1
+                  ? 'is-spoken'
+                  : age > 1
+                    ? 'is-spoken-far'
                     : 'is-upcoming';
               return (
-                <span
-                  key={`${wIdx}-${word}`}
-                  className={`reels-word-mask ${isHero ? 'is-hero' : ''} ${stateClass}`}
-                  style={{ '--word-i': wIdx } as React.CSSProperties}
+                <div
+                  key={item.id}
+                  className={`ae-world-word variant-${item.variant} ${stateCls} ${hasPunctuation ? 'has-accent-mark' : ''}`}
+                  style={
+                    {
+                      '--wx': `${item.x}px`,
+                      '--wy': `${item.y}px`,
+                      '--wrot': `${item.rot}deg`,
+                      '--wsize': `${item.fontSize}px`,
+                    } as React.CSSProperties
+                  }
                 >
-                  <span className="reels-word-inner" data-word={word}>
-                    {word}
-                  </span>
-                </span>
+                  <span className="ae-world-word-text">{item.word}</span>
+                </div>
               );
             })}
           </div>
