@@ -5,16 +5,22 @@ export class LiveAudioAnalyzer {
   private analyser: AnalyserNode | null = null;
   private stream: MediaStream | null = null;
   private dataArray: Uint8Array<ArrayBuffer> | null = null;
+  private prevBins: Uint8Array<ArrayBuffer> | null = null;
   private bassHistory = 0;
-  private energyHistory = 0;
+  private fluxHistory = 0;
+  private runningPeak = 0.45;
   private gain = 1.0;
   private lastSampleTimeSec: number | null = null;
+  private lastBeatTimeSec = -10;
+  private beatIntervals: number[] = [];
   private smoothed: AudioMetrics = {
     bass: 0,
     mid: 0,
     treble: 0,
     energy: 0,
     beat: 0,
+    bpm: 0,
+    beatCount: 0,
     audioSource: 'none',
   };
 
@@ -49,7 +55,14 @@ export class LiveAudioAnalyzer {
     this.analyser = analyser;
     this.stream = stream;
     this.dataArray = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+    this.prevBins = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+    this.fluxHistory = 0;
+    this.runningPeak = 0.45;
     this.lastSampleTimeSec = null;
+    this.lastBeatTimeSec = -10;
+    this.beatIntervals = [];
+    this.smoothed.bpm = 0;
+    this.smoothed.beatCount = 0;
     this.smoothed.audioSource = sourceType;
   }
 
@@ -96,9 +109,15 @@ export class LiveAudioAnalyzer {
     }
     this.analyser = null;
     this.dataArray = null;
+    this.prevBins = null;
     this.bassHistory = 0;
-    this.energyHistory = 0;
+    this.fluxHistory = 0;
+    this.runningPeak = 0.45;
     this.lastSampleTimeSec = null;
+    this.lastBeatTimeSec = -10;
+    this.beatIntervals = [];
+    this.smoothed.bpm = 0;
+    this.smoothed.beatCount = 0;
     this.smoothed.audioSource = 'none';
   }
 
@@ -116,40 +135,72 @@ export class LiveAudioAnalyzer {
         : Math.min(0.05, Math.max(0.001, timeSec - this.lastSampleTimeSec));
     this.lastSampleTimeSec = timeSec;
 
-    if (this.analyser && this.dataArray && this.smoothed.audioSource !== 'none') {
+    if (this.analyser && this.dataArray && this.prevBins && this.smoothed.audioSource !== 'none') {
       if (this.ctx && this.ctx.state === 'suspended') {
         void this.ctx.resume();
       }
       this.analyser.getByteFrequencyData(this.dataArray);
       const bins = this.dataArray;
+      const prev = this.prevBins;
       const len = bins.length;
+
+      // Positive spectral flux (low-band weighted for kick/snare transients)
+      let fluxSum = 0;
+      const fluxEnd = Math.min(len, 48);
+      for (let i = 0; i < fluxEnd; i++) {
+        const diff = bins[i] - prev[i];
+        if (diff > 0) {
+          fluxSum += i < 12 ? diff * 1.6 : diff;
+        }
+        prev[i] = bins[i];
+      }
+      const normFlux = fluxSum / (Math.max(1, fluxEnd) * 255);
 
       let bassSum = 0;
       const bassEnd = Math.min(len, 8);
       for (let i = 0; i < bassEnd; i++) bassSum += bins[i];
-      const rawBass = Math.min(1, (bassSum / (Math.max(1, bassEnd) * 255)) * this.gain);
+      const baseBass = bassSum / (Math.max(1, bassEnd) * 255);
 
       let midSum = 0;
       const midEnd = Math.min(len, 36);
       for (let i = 8; i < midEnd; i++) midSum += bins[i];
-      const rawMid = Math.min(1, (midSum / (Math.max(1, midEnd - 8) * 255)) * this.gain);
+      const baseMid = midSum / (Math.max(1, midEnd - 8) * 255);
 
       let trebleSum = 0;
       const trebleEnd = Math.min(len, 96);
       for (let i = 36; i < trebleEnd; i++) trebleSum += bins[i];
-      const rawTreble = Math.min(1, (trebleSum / (Math.max(1, trebleEnd - 36) * 255)) * this.gain);
+      const baseTreble = trebleSum / (Math.max(1, trebleEnd - 36) * 255);
 
+      // Adaptive loudness auto-normalization (responds smoothly to quiet ambient & loud drops)
+      const instantPeak = Math.max(baseBass, baseMid * 0.9, baseTreble * 0.8);
+      if (instantPeak > this.runningPeak) {
+        this.runningPeak += (instantPeak - this.runningPeak) * (1 - Math.exp(-8.0 * dt));
+      } else {
+        this.runningPeak = Math.max(
+          0.18,
+          this.runningPeak + (instantPeak - this.runningPeak) * (1 - Math.exp(-0.35 * dt))
+        );
+      }
+      const autoScale = Math.min(2.2, Math.max(0.75, 0.72 / Math.max(0.18, this.runningPeak))) * this.gain;
+
+      const rawBass = Math.min(1, baseBass * autoScale);
+      const rawMid = Math.min(1, baseMid * autoScale);
+      const rawTreble = Math.min(1, baseTreble * autoScale);
       const rawEnergy = rawBass * 0.5 + rawMid * 0.35 + rawTreble * 0.15;
 
-      // Zero-lag transient detector: snap beat immediately on kick/drop, decay smoothly
+      // Adaptive Spectral Flux + Bass transient detector
       const bassDelta = rawBass - this.bassHistory;
-      const energyDelta = rawEnergy - this.energyHistory;
       const histAlpha = 1 - Math.exp(-7.5 * dt);
       this.bassHistory += (rawBass - this.bassHistory) * histAlpha;
-      this.energyHistory += (rawEnergy - this.energyHistory) * histAlpha;
 
-      const transient = Math.max(bassDelta * 6.2, energyDelta * 4.8);
-      const beatImpulse = transient > 0.16 ? Math.min(1, transient) : 0;
+      const fluxAlpha = 1 - Math.exp(-5.0 * dt);
+      const fluxThreshold = Math.max(0.035, this.fluxHistory * 1.45);
+      this.fluxHistory += (normFlux - this.fluxHistory) * fluxAlpha;
+
+      const fluxImpulse =
+        normFlux > fluxThreshold ? Math.min(1, ((normFlux - fluxThreshold) / fluxThreshold) * 0.85) : 0;
+      const bassImpulse = bassDelta > 0.03 ? Math.min(1, bassDelta * 6.0) : 0;
+      const beatImpulse = Math.max(fluxImpulse, bassImpulse);
 
       this.smoothed.bass = this.follow(this.smoothed.bass, rawBass, dt, 48, 12);
       this.smoothed.mid = this.follow(this.smoothed.mid, rawMid, dt, 42, 11);
@@ -158,6 +209,28 @@ export class LiveAudioAnalyzer {
 
       const decayedBeat = this.smoothed.beat * Math.exp(-10.5 * dt);
       this.smoothed.beat = beatImpulse > decayedBeat ? beatImpulse : decayedBeat;
+
+      // Auto-BPM tracker from beat onset intervals (median-filtered, 70–180 BPM range)
+      if (beatImpulse > 0.52 && timeSec - this.lastBeatTimeSec >= 0.28) {
+        const interval = timeSec - this.lastBeatTimeSec;
+        this.lastBeatTimeSec = timeSec;
+        this.smoothed.beatCount += 1;
+
+        if (interval >= 0.28 && interval <= 1.2) {
+          this.beatIntervals.push(interval);
+          if (this.beatIntervals.length > 10) {
+            this.beatIntervals.shift();
+          }
+          if (this.beatIntervals.length >= 4) {
+            const sorted = [...this.beatIntervals].sort((a, b) => a - b);
+            const medianInterval = sorted[sorted.length >> 1];
+            let estBpm = 60 / medianInterval;
+            while (estBpm < 72) estBpm *= 2;
+            while (estBpm > 176) estBpm /= 2;
+            this.smoothed.bpm = Math.round(estBpm);
+          }
+        }
+      }
 
       return this.smoothed;
     }

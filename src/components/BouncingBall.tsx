@@ -17,6 +17,7 @@ interface BouncingBallProps {
   pixelStyle?: boolean;
   topOffset?: number;
   visible?: boolean;
+  lyricOffsetMs?: number;
 }
 
 interface WordPoint {
@@ -37,6 +38,7 @@ export function BouncingBall({
   pixelStyle = false,
   topOffset = -10,
   visible = true,
+  lyricOffsetMs = 0,
 }: BouncingBallProps) {
   const ballRef = useRef<HTMLSpanElement | null>(null);
   const pointsRef = useRef<WordPoint[]>([]);
@@ -79,9 +81,10 @@ export function BouncingBall({
       if (pts.length === 0) return;
 
       const clock = clockRef.current;
-      const liveMs = clock.isPlaying
-        ? clock.progressMs + (performance.now() - clock.updatedAt)
-        : clock.progressMs;
+      const liveMs =
+        (clock.isPlaying
+          ? clock.progressMs + (performance.now() - clock.updatedAt)
+          : clock.progressMs) + lyricOffsetMs;
 
       const span = Math.max(800, lineDurationMs * 0.82);
       const elapsed = Math.max(0, liveMs - lineStartMs);
@@ -141,6 +144,7 @@ export function BouncingBall({
     lineDurationMs,
     lineKey,
     lineStartMs,
+    lyricOffsetMs,
     pixelStyle,
     topOffset,
     visible,

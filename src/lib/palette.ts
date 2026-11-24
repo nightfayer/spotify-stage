@@ -51,12 +51,55 @@ function getLuminance(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const num = parseInt(clean.length === 3 ? clean.replace(/(.)/g, '$1$1') : clean, 16);
+  if (Number.isNaN(num)) return [128, 128, 128];
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+function liftColorForDarkBg(hex: string, minLum: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  const lum = getLuminance(r, g, b);
+  if (lum >= minLum) return hex;
+  const boost = Math.min(0.78, (minLum - lum) / Math.max(0.08, 1 - lum));
+  return rgbToHex(
+    r + (255 - r) * boost,
+    g + (255 - g) * boost,
+    b + (255 - b) * boost
+  );
+}
+
+/**
+ * Ensures extracted or preset palettes keep crisp readability for lyrics & HUD
+ * even on all-white, neon-yellow, or pitch-black album covers.
+ */
+export function ensureReadablePalette(palette: TrackPalette): TrackPalette {
+  const [br, bg, bb] = hexToRgb(palette.background);
+  const bgLum = getLuminance(br, bg, bb);
+  const safeBg =
+    bgLum > 0.14
+      ? rgbToHex(br * 0.22, bg * 0.22, bb * 0.26 + 6)
+      : palette.background;
+
+  return {
+    primary: liftColorForDarkBg(palette.primary, 0.34),
+    secondary: liftColorForDarkBg(palette.secondary, 0.26),
+    accent: liftColorForDarkBg(palette.accent, 0.56),
+    background: safeBg,
+  };
+}
+
+const paletteCache = new Map<string, TrackPalette>();
+
 /**
  * Samples an album cover on an offscreen canvas and extracts a 4-color palette
  * weighted toward saturated, high-contrast tones for 3D lighting.
  */
 export async function extractPaletteFromImage(imageUrl: string | null): Promise<TrackPalette> {
   if (!imageUrl) return DEFAULT_PALETTE;
+  const cached = paletteCache.get(imageUrl);
+  if (cached) return cached;
 
   return new Promise((resolve) => {
     const img = new Image();
@@ -140,12 +183,14 @@ export async function extractPaletteFromImage(imageUrl: string | null): Promise<
         // Deep background derived from primary so the 3D scene stays cohesive
         const bg = rgbToHex(primary.r * 0.1, primary.g * 0.1, primary.b * 0.14 + 8);
 
-        resolve({
+        const palette = ensureReadablePalette({
           primary: rgbToHex(primary.r, primary.g, primary.b),
           secondary: rgbToHex(secondary.r, secondary.g, secondary.b),
           accent: rgbToHex(accent.r, accent.g, accent.b),
           background: bg,
         });
+        paletteCache.set(imageUrl, palette);
+        resolve(palette);
       } catch {
         resolve(DEFAULT_PALETTE);
       }

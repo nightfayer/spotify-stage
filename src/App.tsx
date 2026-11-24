@@ -5,6 +5,7 @@ import {
   Captions,
   Eye,
   EyeOff,
+  HelpCircle,
   Maximize2,
   Mic,
   MicOff,
@@ -31,9 +32,12 @@ import {
 } from './lib/palette';
 import {
   controlSpotifyPlayback,
+  fetchNextQueuedTrack,
   fetchSpotifyPlayback,
   handleSpotifyCallbackIfPresent,
   isSpotifyAuthenticated,
+  seekSpotifyPlayback,
+  type QueuedTrackPreview,
 } from './lib/spotify';
 import type {
   AudioSourceType,
@@ -88,6 +92,28 @@ type StyledLyricState = ActiveLyricState & {
   fx: (typeof LYRIC_FX)[number];
 };
 
+const PREFS_STORAGE_KEY = 'spotify_stage_prefs_v1';
+
+interface SavedPrefs {
+  biomeChoice?: BiomeId;
+  palettePreset?: PalettePresetId;
+  fontStyle?: FontStyleMode;
+  lyricMode?: LyricMode;
+  bouncingBall?: boolean;
+  audioGain?: number;
+  lyricOffsetMs?: number;
+}
+
+function loadSavedPrefs(): SavedPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as SavedPrefs;
+  } catch {
+    return {};
+  }
+}
+
 function formatTime(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = Math.floor(totalSec / 60);
@@ -102,24 +128,35 @@ export function App() {
     analyzerRef.current = new LiveAudioAnalyzer();
   }
 
+  const initialPrefs = useMemo(() => loadSavedPrefs(), []);
   const [isAuthenticated, setIsAuthenticated] = useState(() => isSpotifyAuthenticated());
   const [demoIndex, setDemoIndex] = useState(0);
   const [track, setTrack] = useState<TrackState>(DEMO_TRACKS[0]);
-  const [biomeChoice, setBiomeChoice] = useState<BiomeId>('auto');
+  const [biomeChoice, setBiomeChoice] = useState<BiomeId>(initialPrefs.biomeChoice ?? 'auto');
   const [vjStep, setVjStep] = useState(0);
   const [audioSource, setAudioSource] = useState<AudioSourceType>('none');
-  const [lyricMode, setLyricMode] = useState<LyricMode>('kinetic');
-  const [fontStyle, setFontStyle] = useState<FontStyleMode>('pixel');
-  const [bouncingBall, setBouncingBall] = useState(true);
-  const [palettePreset, setPalettePreset] = useState<PalettePresetId>('cover');
-  const [audioGain, setAudioGain] = useState(1.0);
+  const [lyricMode, setLyricMode] = useState<LyricMode>(initialPrefs.lyricMode ?? 'kinetic');
+  const [fontStyle, setFontStyle] = useState<FontStyleMode>(initialPrefs.fontStyle ?? 'pixel');
+  const [bouncingBall, setBouncingBall] = useState(initialPrefs.bouncingBall ?? true);
+  const [palettePreset, setPalettePreset] = useState<PalettePresetId>(
+    initialPrefs.palettePreset ?? 'cover'
+  );
+  const [audioGain, setAudioGain] = useState(initialPrefs.audioGain ?? 1.0);
+  const [lyricOffsetMs, setLyricOffsetMs] = useState(initialPrefs.lyricOffsetMs ?? 0);
+  const [oledDimmed, setOledDimmed] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [upNextTrack, setUpNextTrack] = useState<QueuedTrackPreview | null>(null);
+  const [showUpNext, setShowUpNext] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [lyrics, setLyrics] = useState<LyricLine[]>(DEMO_LYRICS[DEMO_TRACKS[0].id] ?? []);
   const lyricsOverlayRef = useRef<HTMLDivElement | null>(null);
   const lyricWordsRef = useRef<HTMLParagraphElement | null>(null);
   const progressFillRef = useRef<HTMLDivElement | null>(null);
   const timecodeRef = useRef<HTMLSpanElement | null>(null);
+  const vuMeterRef = useRef<HTMLDivElement | null>(null);
+  const bpmTagRef = useRef<HTMLSpanElement | null>(null);
+  const lastBeatSwitchCountRef = useRef<number>(0);
   const playbackClockRef = useRef<PlaybackClock>({
     progressMs: DEMO_TRACKS[0].progressMs,
     updatedAt: performance.now(),
@@ -196,6 +233,7 @@ export function App() {
   }, [palettePreset, track]);
 
   const wakeHud = useCallback(() => {
+    setOledDimmed(false);
     const now = performance.now();
     if (hudVisibleRef.current && now - lastHudWakeRef.current < 180) return;
     lastHudWakeRef.current = now;
@@ -216,6 +254,63 @@ export function App() {
   useEffect(() => {
     analyzerRef.current?.setGain(audioGain);
   }, [audioGain]);
+
+  // Persist user stage preferences to localStorage
+  useEffect(() => {
+    try {
+      const prefs: SavedPrefs = {
+        biomeChoice,
+        palettePreset,
+        fontStyle,
+        lyricMode,
+        bouncingBall,
+        audioGain,
+        lyricOffsetMs,
+      };
+      localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
+    } catch {
+      // Ignore storage quota / private mode errors
+    }
+  }, [audioGain, biomeChoice, bouncingBall, fontStyle, lyricMode, lyricOffsetMs, palettePreset]);
+
+  // Screen Wake Lock API: keep second monitor / TV awake while playing
+  useEffect(() => {
+    if (!track.isPlaying || !('wakeLock' in navigator)) return;
+    let sentinel: WakeLockSentinel | null = null;
+    let cancelled = false;
+
+    const acquire = async () => {
+      try {
+        if (document.hidden || cancelled) return;
+        sentinel = await navigator.wakeLock.request('screen');
+      } catch {
+        // Wake Lock may be rejected on low battery or unsupported contexts
+      }
+    };
+
+    void acquire();
+    const onVisibility = () => {
+      if (!document.hidden) void acquire();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (sentinel) {
+        void sentinel.release();
+      }
+    };
+  }, [track.isPlaying]);
+
+  // OLED burn-in protection: gently dim the stage after 90s on pause
+  useEffect(() => {
+    if (track.isPlaying) {
+      setOledDimmed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setOledDimmed(true), 90_000);
+    return () => window.clearTimeout(timer);
+  }, [track.isPlaying]);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -345,6 +440,22 @@ export function App() {
               }
             }
           );
+
+          // Preload next track in Spotify queue (cover, palette, lyrics) for 0ms next-track latency
+          setUpNextTrack(null);
+          void fetchNextQueuedTrack().then((next) => {
+            if (cancelled || !next || next.id === snapshot.id) return;
+            setUpNextTrack(next);
+            if (next.coverUrl) {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.src = next.coverUrl;
+              void extractPaletteFromImage(next.coverUrl);
+            }
+            if (next.artist && next.title) {
+              void fetchSyncedLyrics(next.artist, next.title, next.durationMs);
+            }
+          });
         } else {
           setTrack((prev) => {
             const genresChanged =
@@ -393,6 +504,7 @@ export function App() {
     let rafId = 0;
     let lastSecond = -1;
     let lastLyricKey = '';
+    let lastShowUpNext = false;
     const durationMs = Math.max(1, track.durationMs);
     const formattedDuration = formatTime(durationMs);
 
@@ -420,13 +532,19 @@ export function App() {
         fill.style.transform = `scaleX(${Math.min(1, Math.max(0, liveMs / durationMs)).toFixed(4)})`;
       }
 
-      // 2. Timecode DOM update only once per second
+      // 2. Timecode DOM update only once per second + Up Next banner window (last 14s)
       const curSec = Math.floor(liveMs / 1000);
       if (curSec !== lastSecond) {
         lastSecond = curSec;
         const tc = timecodeRef.current;
         if (tc) {
           tc.textContent = `${formatTime(liveMs)} / ${formattedDuration}`;
+        }
+        const remainingMs = durationMs - liveMs;
+        const shouldShowNext = clock.isPlaying && remainingMs > 1200 && remainingMs <= 14_000;
+        if (shouldShowNext !== lastShowUpNext) {
+          lastShowUpNext = shouldShowNext;
+          setShowUpNext(shouldShowNext);
         }
       }
 
@@ -439,7 +557,7 @@ export function App() {
         return;
       }
 
-      const state = getActiveLyricState(lyrics, liveMs);
+      const state = getActiveLyricState(lyrics, liveMs + lyricOffsetMs);
       const nextKey = state ? `${state.index}:${state.activeWordIndex}` : 'none';
       if (nextKey !== lastLyricKey) {
         lastLyricKey = nextKey;
@@ -455,12 +573,13 @@ export function App() {
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isAuthenticated, lyricMode, lyrics, track.durationMs, track.id]);
+  }, [isAuthenticated, lyricMode, lyricOffsetMs, lyrics, track.durationMs, track.id]);
 
   // Sync demo track when not authenticated
   useEffect(() => {
     if (isAuthenticated) return;
     const demo = DEMO_TRACKS[demoIndex];
+    const nextDemo = DEMO_TRACKS[(demoIndex + 1) % DEMO_TRACKS.length];
     lastTrackIdRef.current = demo.id;
     playbackClockRef.current = {
       progressMs: demo.progressMs,
@@ -469,6 +588,13 @@ export function App() {
     };
     setTrack(demo);
     setLyrics(DEMO_LYRICS[demo.id] ?? []);
+    setUpNextTrack({
+      id: nextDemo.id,
+      title: nextDemo.title,
+      artist: nextDemo.artist,
+      coverUrl: nextDemo.coverUrl,
+      durationMs: nextDemo.durationMs,
+    });
   }, [demoIndex, isAuthenticated]);
 
   // Mouse activity listener for auto-hide HUD
@@ -574,6 +700,33 @@ export function App() {
     }
   }, [isAuthenticated, showNotice]);
 
+  const handleSeek = useCallback(
+    async (e: React.MouseEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      const targetMs = Math.round(ratio * track.durationMs);
+
+      playbackClockRef.current = {
+        progressMs: targetMs,
+        updatedAt: performance.now(),
+        isPlaying: playbackClockRef.current.isPlaying,
+      };
+      if (progressFillRef.current) {
+        progressFillRef.current.style.transform = `scaleX(${ratio.toFixed(4)})`;
+      }
+
+      if (isAuthenticated) {
+        try {
+          await seekSpotifyPlayback(targetMs);
+        } catch {
+          showNotice('Перемотка недоступна для текущего устройства');
+        }
+      }
+    },
+    [isAuthenticated, showNotice, track.durationMs]
+  );
+
   const handleSnapshot = useCallback(() => {
     stageRef.current?.capturePoster(effectiveTrack);
     showNotice('Постер сохранён', 1800);
@@ -620,6 +773,23 @@ export function App() {
           setHudVisible(true);
           return next;
         });
+      } else if (e.code === 'BracketLeft') {
+        setLyricOffsetMs((prev) => {
+          const next = Math.max(-500, prev - 25);
+          showNotice(`Смещение лирики: ${next >= 0 ? `+${next}` : next} мс`, 1400);
+          return next;
+        });
+      } else if (e.code === 'BracketRight') {
+        setLyricOffsetMs((prev) => {
+          const next = Math.min(500, prev + 25);
+          showNotice(`Смещение лирики: ${next >= 0 ? `+${next}` : next} мс`, 1400);
+          return next;
+        });
+      } else if (e.code === 'Escape') {
+        setHelpOpen(false);
+        setTuneOpen(false);
+      } else if (e.key === '?' || (e.code === 'Slash' && e.shiftKey)) {
+        setHelpOpen((v) => !v);
       } else if (e.code === 'Space') {
         e.preventDefault();
         void handlePlayPause();
@@ -633,16 +803,54 @@ export function App() {
     handlePlayPause,
     handleSnapshot,
     modalOpen,
+    showNotice,
     toggleMic,
     toggleSystemAudio,
   ]);
+
+  // Media Session API: hardware media keys & remote controls
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        artwork: track.coverUrl ? [{ src: track.coverUrl, sizes: '512x512', type: 'image/jpeg' }] : [],
+      });
+      navigator.mediaSession.playbackState = track.isPlaying ? 'playing' : 'paused';
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (!track.isPlaying) void handlePlayPause();
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (track.isPlaying) void handlePlayPause();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        void handleNext();
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        void handlePrev();
+      });
+    } catch {
+      // Some browsers restrict MediaSession handlers
+    }
+  }, [handleNext, handlePlayPause, handlePrev, track.album, track.artist, track.coverUrl, track.isPlaying, track.title]);
 
   const getMetrics = useCallback((t: number, playing: boolean) => {
     return analyzerRef.current!.sample(t, playing);
   }, []);
 
   const handleMetricsFrame = useCallback(
-    (metrics: { beat: number; bass: number; mid: number; treble: number; audioSource: AudioSourceType }) => {
+    (metrics: {
+      beat: number;
+      bass: number;
+      mid: number;
+      treble: number;
+      energy: number;
+      bpm: number;
+      beatCount: number;
+      audioSource: AudioSourceType;
+    }) => {
       const intensity = Math.min(1, metrics.beat * 0.75 + metrics.bass * 0.45);
       const el = lyricsOverlayRef.current;
       if (el) {
@@ -656,16 +864,29 @@ export function App() {
         hud.style.setProperty('--treble', metrics.treble.toFixed(3));
       }
 
-      // Beat-drop scene switch in Auto VJ mode when live audio is active (min 14s cooldown)
-      if (
-        biomeChoice === 'auto' &&
-        metrics.audioSource !== 'none' &&
-        metrics.beat > 0.74 &&
-        metrics.bass > 0.5
-      ) {
+      const vu = vuMeterRef.current;
+      if (vu) {
+        vu.style.transform = `scaleX(${Math.min(1, Math.max(0.03, metrics.energy)).toFixed(3)})`;
+      }
+      const bpmEl = bpmTagRef.current;
+      if (bpmEl) {
+        const nextText = metrics.bpm > 0 ? `${metrics.bpm} BPM` : '— BPM';
+        if (bpmEl.textContent !== nextText) {
+          bpmEl.textContent = nextText;
+        }
+      }
+
+      // Beat-locked Auto VJ scene switch on 32-beat phrases or strong drops (min 14s cooldown)
+      if (biomeChoice === 'auto' && metrics.audioSource !== 'none') {
         const now = Date.now();
-        if (now - lastVjSwitchRef.current >= 14_000) {
+        const phraseSwitch =
+          metrics.beatCount > 0 &&
+          metrics.beatCount !== lastBeatSwitchCountRef.current &&
+          metrics.beatCount % 32 === 0;
+        const dropSwitch = metrics.beat > 0.74 && metrics.bass > 0.5;
+        if ((phraseSwitch || dropSwitch) && now - lastVjSwitchRef.current >= 14_000) {
           lastVjSwitchRef.current = now;
+          lastBeatSwitchCountRef.current = metrics.beatCount;
           setVjStep((s) => s + 1);
         }
       }
@@ -676,7 +897,7 @@ export function App() {
   const hideCursor = !hudVisible && !hudPinned && !modalOpen && !tuneOpen;
 
   return (
-    <main className={`stage-root ${hideCursor ? 'is-idle-cursor' : ''}`}>
+    <main className={`stage-root ${hideCursor ? 'is-idle-cursor' : ''} ${oledDimmed ? 'is-oled-dim' : ''}`}>
       <StageCanvas
         ref={stageRef}
         biome={resolvedBiome}
@@ -714,6 +935,7 @@ export function App() {
           clockRef={playbackClockRef}
           showBall={bouncingBall}
           fontStyle={fontStyle}
+          lyricOffsetMs={lyricOffsetMs}
         />
       )}
 
@@ -744,6 +966,7 @@ export function App() {
               wordSelector=".lyric-word"
               pixelStyle={fontStyle === 'pixel'}
               visible={bouncingBall}
+              lyricOffsetMs={lyricOffsetMs}
             />
             {activeLyric.words.map((word, wIdx) => {
               const cls =
@@ -792,6 +1015,7 @@ export function App() {
               wordSelector=".lyric-word"
               pixelStyle={fontStyle === 'pixel'}
               visible={bouncingBall}
+              lyricOffsetMs={lyricOffsetMs}
             />
             {activeLyric.words.map((word, wIdx) => {
               const cls =
@@ -809,6 +1033,20 @@ export function App() {
           </p>
           <p className="scroll-line is-next">{activeLyric.nextText ?? '\u00A0'}</p>
         </div>
+      )}
+
+      {/* Up Next cinematic corner card in the last 14s of a track */}
+      {showUpNext && upNextTrack && !titleCardTrack && (
+        <aside className="up-next-card" aria-label="Следующий трек">
+          {upNextTrack.coverUrl && (
+            <img src={upNextTrack.coverUrl} alt="" className="up-next-cover" />
+          )}
+          <div className="up-next-meta">
+            <span className="up-next-kicker">ДАЛЕЕ</span>
+            <strong className="up-next-title">{upNextTrack.title}</strong>
+            <span className="up-next-artist">{upNextTrack.artist}</span>
+          </div>
+        </aside>
       )}
 
       {/* Status Toast */}
@@ -842,7 +1080,11 @@ export function App() {
             </div>
             <h1 className="track-title">{track.title}</h1>
             <p className="track-artist">{track.artist}</p>
-            <div className="progress-track">
+            <div
+              className="progress-track is-seekable"
+              onClick={handleSeek}
+              title="Нажмите для перемотки"
+            >
               <div
                 ref={progressFillRef}
                 className="progress-fill"
@@ -891,6 +1133,19 @@ export function App() {
                 </div>
               </div>
               <div className="tune-group">
+                <div className="tune-label-row">
+                  <span className="tune-label">Уровень звука ({audioSource === 'none' ? 'нет сигнала' : audioSource})</span>
+                  <span ref={bpmTagRef} className="tune-bpm-badge">— BPM</span>
+                </div>
+                <div className="vu-meter-track" aria-hidden="true">
+                  <div
+                    ref={vuMeterRef}
+                    className="vu-meter-fill"
+                    style={{ backgroundColor: effectiveTrack.palette.accent }}
+                  />
+                </div>
+              </div>
+              <div className="tune-group">
                 <span className="tune-label">Чувствительность звука ({audioGain.toFixed(1)}x)</span>
                 <input
                   type="range"
@@ -899,6 +1154,20 @@ export function App() {
                   step={0.1}
                   value={audioGain}
                   onChange={(e) => setAudioGain(Number(e.target.value))}
+                  className="gain-slider"
+                />
+              </div>
+              <div className="tune-group">
+                <span className="tune-label">
+                  Смещение лирики ({lyricOffsetMs >= 0 ? `+${lyricOffsetMs}` : lyricOffsetMs} мс)
+                </span>
+                <input
+                  type="range"
+                  min={-500}
+                  max={500}
+                  step={25}
+                  value={lyricOffsetMs}
+                  onChange={(e) => setLyricOffsetMs(Number(e.target.value))}
                   className="gain-slider"
                 />
               </div>
@@ -1007,6 +1276,15 @@ export function App() {
 
               <button
                 type="button"
+                className={`icon-btn ${helpOpen ? 'is-active-pill' : ''}`}
+                onClick={() => setHelpOpen((v) => !v)}
+                title="Горячие клавиши (?)"
+              >
+                <HelpCircle size={16} />
+              </button>
+
+              <button
+                type="button"
                 className={`connect-btn ${isAuthenticated ? 'is-connected' : ''}`}
                 onClick={() => setModalOpen(true)}
               >
@@ -1017,6 +1295,37 @@ export function App() {
           </div>
         </section>
       </div>
+
+      {helpOpen && (
+        <div className="shortcuts-backdrop" onClick={() => setHelpOpen(false)}>
+          <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="shortcuts-header">
+              <h2>Горячие клавиши</h2>
+              <button
+                type="button"
+                className="dock-tab"
+                onClick={() => setHelpOpen(false)}
+              >
+                Esc
+              </button>
+            </div>
+            <div className="shortcuts-grid">
+              <div><kbd>0</kbd><span>Режим Auto VJ (в такт биту)</span></div>
+              <div><kbd>1</kbd>–<kbd>6</kbd><span>Выбор сцены (Ocean … Type)</span></div>
+              <div><kbd>Space</kbd><span>Пауза / воспроизведение</span></div>
+              <div><kbd>A</kbd><span>Захват звука вкладки / системы</span></div>
+              <div><kbd>M</kbd><span>Микрофон</span></div>
+              <div><kbd>L</kbd><span>Режим субтитров</span></div>
+              <div><kbd>F</kbd><span>Шрифт (Pixel / Editorial / Brutal)</span></div>
+              <div><kbd>[</kbd> / <kbd>]</kbd><span>Смещение лирики ±25 мс</span></div>
+              <div><kbd>G</kbd><span>Палитры, Gain, VU-метр и Offset</span></div>
+              <div><kbd>S</kbd><span>Сохранить арт-постер в PNG</span></div>
+              <div><kbd>H</kbd><span>Закрепить / скрыть HUD</span></div>
+              <div><kbd>?</kbd><span>Показать / скрыть эту справку</span></div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SpotifyConnectModal
         open={modalOpen}

@@ -48,5 +48,7 @@ export interface AudioMetrics {
   treble: number;
   energy: number;
   beat: number;
+  bpm: number;
+  beatCount: number;
   audioSource: AudioSourceType;
 }

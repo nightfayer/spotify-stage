@@ -10,6 +10,7 @@ interface KineticTypeStageProps {
   clockRef: React.RefObject<PlaybackClock>;
   showBall: boolean;
   fontStyle: FontStyleMode;
+  lyricOffsetMs: number;
 }
 
 const SHOT_STYLES = [
@@ -58,6 +59,7 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   clockRef,
   showBall,
   fontStyle,
+  lyricOffsetMs,
 }: KineticTypeStageProps) {
   const wordsContainerRef = useRef<HTMLDivElement | null>(null);
   const topProgressFillRef = useRef<HTMLDivElement | null>(null);
@@ -208,6 +210,7 @@ export const KineticTypeStage = memo(function KineticTypeStage({
               wordSelector=".reels-word-mask"
               topOffset={6}
               visible={showBall}
+              lyricOffsetMs={lyricOffsetMs}
             />
           )}
           {currentShot.words.map((word, wIdx) => {

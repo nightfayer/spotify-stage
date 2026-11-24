@@ -293,3 +293,56 @@ export async function controlSpotifyPlayback(
     throw new Error(`Spotify playback error (${res.status})`);
   }
 }
+
+export async function seekSpotifyPlayback(positionMs: number): Promise<void> {
+  const token = await getValidAccessToken();
+  if (!token) return;
+
+  const clamped = Math.max(0, Math.round(positionMs));
+  const res = await fetch(
+    `https://api.spotify.com/v1/me/player/seek?position_ms=${clamped}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`Spotify seek error (${res.status})`);
+  }
+}
+
+export interface QueuedTrackPreview {
+  id: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  durationMs: number;
+}
+
+export async function fetchNextQueuedTrack(): Promise<QueuedTrackPreview | null> {
+  const token = await getValidAccessToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/queue', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const nextItem = Array.isArray(data?.queue)
+      ? data.queue.find((q: { type?: string }) => q?.type === 'track')
+      : null;
+    if (!nextItem?.id) return null;
+
+    return {
+      id: nextItem.id,
+      title: nextItem.name ?? '',
+      artist:
+        nextItem.artists?.map((a: { name: string }) => a.name).join(', ') ?? '',
+      coverUrl: nextItem.album?.images?.[0]?.url ?? null,
+      durationMs: nextItem.duration_ms ?? 180_000,
+    };
+  } catch {
+    return null;
+  }
+}

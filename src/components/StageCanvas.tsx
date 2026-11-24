@@ -1,5 +1,4 @@
 import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from 'react';
-import * as THREE from 'three';
 import type { AudioMetrics, ResolvedBiome, TrackState } from '../types';
 import type { PlaybackClock } from './BouncingBall';
 
@@ -17,10 +16,11 @@ interface StageCanvasProps {
 }
 
 const FULLSCREEN_VERTEX = `
+  attribute vec2 aPos;
   varying vec2 vUv;
   void main() {
-    vUv = uv;
-    gl_Position = vec4(position.xy, 0.0, 1.0);
+    vUv = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
   }
 `;
 
@@ -495,13 +495,142 @@ const TRANSITION_COMPOSITE_FRAGMENT = `
   }
 `;
 
+interface GlTarget {
+  fbo: WebGLFramebuffer;
+  tex: WebGLTexture;
+  width: number;
+  height: number;
+}
+
+interface GlProgram {
+  program: WebGLProgram;
+  aPos: number;
+  u: Record<string, WebGLUniformLocation | null>;
+}
+
+const UNIFORM_NAMES = [
+  'uTime',
+  'uResolution',
+  'uPrimary',
+  'uSecondary',
+  'uAccent',
+  'uBg',
+  'uBass',
+  'uMid',
+  'uTreble',
+  'uBeat',
+  'uProgress',
+  'uFeedbackTex',
+  'uTex',
+  'uPrevTex',
+  'uCurrTex',
+  'uTransition',
+  'uShockAge',
+  'uShockOrigin',
+] as const;
+
+function parseHexToRgb(hex: string, out: [number, number, number]): void {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.replace(/(.)/g, '$1$1') : clean;
+  const num = parseInt(full, 16);
+  if (Number.isNaN(num)) {
+    out[0] = 0.2;
+    out[1] = 0.5;
+    out[2] = 0.9;
+    return;
+  }
+  out[0] = ((num >> 16) & 255) / 255;
+  out[1] = ((num >> 8) & 255) / 255;
+  out[2] = (num & 255) / 255;
+}
+
+function lerpRgb(
+  cur: [number, number, number],
+  target: [number, number, number],
+  alpha: number
+): void {
+  cur[0] += (target[0] - cur[0]) * alpha;
+  cur[1] += (target[1] - cur[1]) * alpha;
+  cur[2] += (target[2] - cur[2]) * alpha;
+}
+
+function compileShader(gl: WebGLRenderingContext, type: number, src: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error('WebGL shader creation failed');
+  gl.shaderSource(shader, src);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(shader) ?? 'Unknown shader compile error';
+    gl.deleteShader(shader);
+    throw new Error(log);
+  }
+  return shader;
+}
+
+function createProgram(
+  gl: WebGLRenderingContext,
+  vertShader: WebGLShader,
+  fragSrc: string
+): GlProgram {
+  const fragShader = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
+  const program = gl.createProgram();
+  if (!program) throw new Error('WebGL program creation failed');
+  gl.attachShader(program, vertShader);
+  gl.attachShader(program, fragShader);
+  gl.linkProgram(program);
+  gl.deleteShader(fragShader);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(program) ?? 'Unknown program link error';
+    gl.deleteProgram(program);
+    throw new Error(log);
+  }
+  const u: Record<string, WebGLUniformLocation | null> = {};
+  for (const name of UNIFORM_NAMES) {
+    u[name] = gl.getUniformLocation(program, name);
+  }
+  return {
+    program,
+    aPos: gl.getAttribLocation(program, 'aPos'),
+    u,
+  };
+}
+
+function createTarget(gl: WebGLRenderingContext, width: number, height: number): GlTarget {
+  const tex = gl.createTexture();
+  const fbo = gl.createFramebuffer();
+  if (!tex || !fbo) throw new Error('WebGL framebuffer creation failed');
+
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return { fbo, tex, width, height };
+}
+
+function resizeTarget(gl: WebGLRenderingContext, target: GlTarget, width: number, height: number): void {
+  if (target.width === width && target.height === height) return;
+  target.width = width;
+  target.height = height;
+  gl.bindTexture(gl.TEXTURE_2D, target.tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
 export const StageCanvas = memo(
   forwardRef<StageCanvasHandle, StageCanvasProps>(function StageCanvas(
     { biome, track, clockRef, getAudioMetrics, onMetricsFrame },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const renderOnceRef = useRef<(() => void) | null>(null);
     const triggerShockRef = useRef<((nx?: number, ny?: number) => void) | null>(null);
     const biomeRef = useRef<ResolvedBiome>(biome);
@@ -514,410 +643,404 @@ export const StageCanvas = memo(
     metricsFnRef.current = getAudioMetrics;
     onMetricsFrameRef.current = onMetricsFrame;
 
-  useImperativeHandle(ref, () => ({
-    triggerShockwave(nx = 0.5, ny = 0.5) {
-      triggerShockRef.current?.(nx, ny);
-    },
-    capturePoster(currentTrack: TrackState) {
-      const glCanvas = rendererRef.current?.domElement;
-      if (!glCanvas) return;
+    useImperativeHandle(ref, () => ({
+      triggerShockwave(nx = 0.5, ny = 0.5) {
+        triggerShockRef.current?.(nx, ny);
+      },
+      capturePoster(currentTrack: TrackState) {
+        const glCanvas = canvasRef.current;
+        if (!glCanvas) return;
 
-      renderOnceRef.current?.();
+        renderOnceRef.current?.();
 
-      const out = document.createElement('canvas');
-      out.width = glCanvas.width;
-      out.height = glCanvas.height;
-      const ctx = out.getContext('2d');
-      if (!ctx) return;
+        const out = document.createElement('canvas');
+        out.width = glCanvas.width;
+        out.height = glCanvas.height;
+        const ctx = out.getContext('2d');
+        if (!ctx) return;
 
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(glCanvas, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(glCanvas, 0, 0);
 
-      const grad = ctx.createLinearGradient(0, out.height * 0.68, 0, out.height);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.72)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, out.height * 0.68, out.width, out.height * 0.32);
+        const grad = ctx.createLinearGradient(0, out.height * 0.68, 0, out.height);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.72)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, out.height * 0.68, out.width, out.height * 0.32);
 
-      const pad = Math.round(out.width * 0.045);
-      const titleSize = Math.max(24, Math.round(out.width * 0.025));
-      const artistSize = Math.max(13, Math.round(out.width * 0.012));
+        const pad = Math.round(out.width * 0.045);
+        const titleSize = Math.max(24, Math.round(out.width * 0.025));
+        const artistSize = Math.max(13, Math.round(out.width * 0.012));
 
-      ctx.fillStyle = 'rgba(255,255,255,0.96)';
-      ctx.font = `600 ${titleSize}px "JetBrains Mono", monospace`;
-      ctx.fillText(currentTrack.title, pad, out.height - pad - artistSize * 1.8);
+        ctx.fillStyle = 'rgba(255,255,255,0.96)';
+        ctx.font = `600 ${titleSize}px "JetBrains Mono", monospace`;
+        ctx.fillText(currentTrack.title, pad, out.height - pad - artistSize * 1.8);
 
-      ctx.fillStyle = 'rgba(255,255,255,0.68)';
-      ctx.font = `400 ${artistSize}px "JetBrains Mono", monospace`;
-      ctx.fillText(
-        `${currentTrack.artist.toUpperCase()} — ${currentTrack.album.toUpperCase()}`,
-        pad,
-        out.height - pad
-      );
+        ctx.fillStyle = 'rgba(255,255,255,0.68)';
+        ctx.font = `400 ${artistSize}px "JetBrains Mono", monospace`;
+        ctx.fillText(
+          `${currentTrack.artist.toUpperCase()} — ${currentTrack.album.toUpperCase()}`,
+          pad,
+          out.height - pad
+        );
 
-      const link = document.createElement('a');
-      const safeName = currentTrack.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      link.download = `stage-8bit-${safeName || 'poster'}.png`;
-      link.href = out.toDataURL('image/png');
-      link.click();
-    },
-  }));
+        const link = document.createElement('a');
+        const safeName = currentTrack.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        link.download = `stage-8bit-${safeName || 'poster'}.png`;
+        link.href = out.toDataURL('image/png');
+        link.click();
+      },
+    }));
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const width = Math.max(1, container.clientWidth);
-    const height = Math.max(1, container.clientHeight);
-
-    const renderer = new THREE.WebGLRenderer({
-      antialias: false,
-      preserveDrawingBuffer: false,
-      powerPreference: 'high-performance',
-    });
-    renderer.setPixelRatio(1);
-    renderer.setSize(width, height);
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Two crisp NearestFilter render targets for 8-bit transitions
-    const rtParams: THREE.RenderTargetOptions = {
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter,
-      depthBuffer: false,
-      stencilBuffer: false,
-    };
-    const rtPrev = new THREE.WebGLRenderTarget(width, height, rtParams);
-    const rtCurr = new THREE.WebGLRenderTarget(width, height, rtParams);
-    let rtEchoRead = new THREE.WebGLRenderTarget(width, height, rtParams);
-    let rtEchoWrite = new THREE.WebGLRenderTarget(width, height, rtParams);
-
-    const colPrimary = new THREE.Color(trackRef.current.palette.primary);
-    const colSecondary = new THREE.Color(trackRef.current.palette.secondary);
-    const colAccent = new THREE.Color(trackRef.current.palette.accent);
-    const colBg = new THREE.Color(trackRef.current.palette.background);
-
-    // Pre-allocated target colors (zero GC allocations per frame)
-    const targetPrimary = colPrimary.clone();
-    const targetSecondary = colSecondary.clone();
-    const targetAccent = colAccent.clone();
-    const targetBg = colBg.clone();
-    let cachedPaletteKey = '';
-
-    const sharedUniforms = {
-      uTime: { value: 0 },
-      uResolution: { value: new THREE.Vector2(width, height) },
-      uPrimary: { value: colPrimary },
-      uSecondary: { value: colSecondary },
-      uAccent: { value: colAccent },
-      uBg: { value: colBg },
-      uBass: { value: 0 },
-      uMid: { value: 0 },
-      uTreble: { value: 0 },
-      uBeat: { value: 0 },
-      uProgress: { value: 0 },
-    };
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    const quadGeo = new THREE.PlaneGeometry(2, 2);
-
-    const echoUniforms = {
-      ...sharedUniforms,
-      uFeedbackTex: { value: rtEchoRead.texture },
-    };
-    const echoMat = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX,
-      fragmentShader: PIXEL_ECHO_FRAGMENT,
-      uniforms: echoUniforms,
-    });
-    const blitUniforms = {
-      uTex: { value: rtEchoRead.texture },
-    };
-    const blitMat = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX,
-      fragmentShader: BLIT_FRAGMENT,
-      uniforms: blitUniforms,
-    });
-
-    const materials: Record<Exclude<ResolvedBiome, 'pixel-echo'>, THREE.ShaderMaterial> = {
-      'pixel-horizon': new THREE.ShaderMaterial({
-        vertexShader: FULLSCREEN_VERTEX,
-        fragmentShader: PIXEL_HORIZON_FRAGMENT,
-        uniforms: sharedUniforms,
-      }),
-      'pixel-plasma': new THREE.ShaderMaterial({
-        vertexShader: FULLSCREEN_VERTEX,
-        fragmentShader: PIXEL_PLASMA_FRAGMENT,
-        uniforms: sharedUniforms,
-      }),
-      'pixel-tunnel': new THREE.ShaderMaterial({
-        vertexShader: FULLSCREEN_VERTEX,
-        fragmentShader: PIXEL_TUNNEL_FRAGMENT,
-        uniforms: sharedUniforms,
-      }),
-      'pixel-kaleido': new THREE.ShaderMaterial({
-        vertexShader: FULLSCREEN_VERTEX,
-        fragmentShader: PIXEL_KALEIDO_FRAGMENT,
-        uniforms: sharedUniforms,
-      }),
-      'kinetic-type': new THREE.ShaderMaterial({
-        vertexShader: FULLSCREEN_VERTEX,
-        fragmentShader: KINETIC_TYPE_FRAGMENT,
-        uniforms: sharedUniforms,
-      }),
-    };
-
-    const quadMesh = new THREE.Mesh(quadGeo, materials['pixel-horizon']);
-    scene.add(quadMesh);
-
-    const compScene = new THREE.Scene();
-    const compUniforms = {
-      uPrevTex: { value: rtPrev.texture },
-      uCurrTex: { value: rtCurr.texture },
-      uTransition: { value: 1.0 },
-      uShockAge: { value: 1.0 },
-      uShockOrigin: { value: new THREE.Vector2(0.5, 0.5) },
-      uAccent: { value: colAccent },
-      uResolution: { value: new THREE.Vector2(width, height) },
-    };
-    const compMat = new THREE.ShaderMaterial({
-      vertexShader: FULLSCREEN_VERTEX,
-      fragmentShader: TRANSITION_COMPOSITE_FRAGMENT,
-      uniforms: compUniforms,
-    });
-    const compMesh = new THREE.Mesh(quadGeo, compMat);
-    compScene.add(compMesh);
-
-    // Pre-compile all shader programs up-front so biome switches (1-6 / Auto VJ) have 0ms stutter
-    const allMats: THREE.ShaderMaterial[] = [
-      ...Object.values(materials),
-      echoMat,
-      blitMat,
-    ];
-    for (const mat of allMats) {
-      quadMesh.material = mat;
-      renderer.compile(scene, camera);
-    }
-    renderer.compile(compScene, camera);
-    quadMesh.material = materials['pixel-horizon'];
-
-    let currentWidth = width;
-    let currentHeight = height;
-
-    const handleResize = () => {
+    useEffect(() => {
+      const container = containerRef.current;
       if (!container) return;
-      const w = Math.max(1, container.clientWidth);
-      const h = Math.max(1, container.clientHeight);
-      if (w === currentWidth && h === currentHeight) return;
-      currentWidth = w;
-      currentHeight = h;
-      renderer.setSize(w, h);
-      rtPrev.setSize(w, h);
-      rtCurr.setSize(w, h);
-      rtEchoRead.setSize(w, h);
-      rtEchoWrite.setSize(w, h);
-      sharedUniforms.uResolution.value.set(w, h);
-      compUniforms.uResolution.value.set(w, h);
-    };
-    window.addEventListener('resize', handleResize);
-    const resizeObserver =
-      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
-    resizeObserver?.observe(container);
 
-    let rafId = 0;
-    let lastPerfMs = performance.now();
-    let elapsedSec = 0;
-    let flowTime = 0;
-    let smoothProgress = 0;
-    let prevBiome: ResolvedBiome = biomeRef.current;
-    let activeBiome: ResolvedBiome = biomeRef.current;
-    let transitionProgress = 1.0;
-    let shockAge = 1.0;
-    let lastAutoShockTime = -10;
+      const width = Math.max(1, container.clientWidth);
+      const height = Math.max(1, container.clientHeight);
 
-    const launchShockwave = (nx = 0.5, ny = 0.5) => {
-      compUniforms.uShockOrigin.value.set(nx, ny);
-      shockAge = 0.0;
-    };
-    triggerShockRef.current = launchShockwave;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.display = 'block';
+      container.appendChild(canvas);
+      canvasRef.current = canvas;
 
-    const handlePointerDown = (e: PointerEvent) => {
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const nx = (e.clientX - rect.left) / rect.width;
-      const ny = 1.0 - (e.clientY - rect.top) / rect.height;
-      launchShockwave(nx, ny);
-    };
-    container.addEventListener('pointerdown', handlePointerDown);
-
-    const renderFrame = () => {
-      const nowMs = performance.now();
-      const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastPerfMs) * 0.001));
-      lastPerfMs = nowMs;
-      elapsedSec += dt;
-
-      const activeTrack = trackRef.current;
-      const nextBiome = biomeRef.current;
-
-      // Trigger 8-bit Bayer diamond wipe only when the visual biome actually changes
-      if (nextBiome !== activeBiome) {
-        prevBiome = activeBiome;
-        activeBiome = nextBiome;
-        transitionProgress = 0.0;
-      }
-
-      if (transitionProgress < 1.0) {
-        transitionProgress = Math.min(1.0, transitionProgress + dt / 0.55);
-      }
-
-      if (shockAge < 1.0) {
-        shockAge = Math.min(1.0, shockAge + dt / 0.65);
-      }
-
-      const metrics = metricsFnRef.current(elapsedSec, activeTrack.isPlaying);
-      onMetricsFrameRef.current?.(metrics);
-
-      // Auto-trigger pixel shockwave on strong live bass drops (min 1.0s cooldown)
-      if (
-        metrics.audioSource !== 'none' &&
-        metrics.beat > 0.72 &&
-        metrics.bass > 0.45 &&
-        elapsedSec - lastAutoShockTime > 1.0
-      ) {
-        lastAutoShockTime = elapsedSec;
-        launchShockwave(0.5, 0.5);
-      }
-
-      // Accumulate energy-driven flow time so worlds slow down in quiet parts and surge on drops
-      const speedScale = activeTrack.isPlaying ? 0.6 + metrics.energy * 1.9 : 0.18;
-      flowTime += dt * speedScale;
-
-      const pal = activeTrack.palette;
-      const palKey = `${pal.primary}${pal.secondary}${pal.accent}${pal.background}`;
-      if (palKey !== cachedPaletteKey) {
-        cachedPaletteKey = palKey;
-        targetPrimary.set(pal.primary);
-        targetSecondary.set(pal.secondary);
-        targetAccent.set(pal.accent);
-        targetBg.set(pal.background);
-      }
-
-      // Frame-rate-independent palette & progress smoothing (consistent across 60Hz/120Hz/144Hz)
-      const colorLerp = 1 - Math.exp(-5.5 * dt);
-      colPrimary.lerp(targetPrimary, colorLerp);
-      colSecondary.lerp(targetSecondary, colorLerp);
-      colAccent.lerp(targetAccent, colorLerp);
-      colBg.lerp(targetBg, colorLerp);
-
-      const clock = clockRef.current;
-      const liveProgressMs = clock.isPlaying
-        ? clock.progressMs + (nowMs - clock.updatedAt)
-        : clock.progressMs;
-      const targetProgress = Math.min(1, Math.max(0, liveProgressMs / Math.max(1, activeTrack.durationMs)));
-      smoothProgress += (targetProgress - smoothProgress) * (1 - Math.exp(-4.0 * dt));
-
-      sharedUniforms.uTime.value = flowTime;
-      sharedUniforms.uBass.value = metrics.bass;
-      sharedUniforms.uMid.value = metrics.mid;
-      sharedUniforms.uTreble.value = metrics.treble;
-      sharedUniforms.uBeat.value = metrics.beat;
-      sharedUniforms.uProgress.value = smoothProgress;
-
-      const stepEcho = () => {
-        echoUniforms.uFeedbackTex.value = rtEchoRead.texture;
-        quadMesh.material = echoMat;
-        renderer.setRenderTarget(rtEchoWrite);
-        renderer.render(scene, camera);
-        const tmp = rtEchoRead;
-        rtEchoRead = rtEchoWrite;
-        rtEchoWrite = tmp;
+      const glOpts: WebGLContextAttributes = {
+        antialias: false,
+        alpha: false,
+        depth: false,
+        stencil: false,
+        preserveDrawingBuffer: false,
+        powerPreference: 'high-performance',
       };
+      const gl = (canvas.getContext('webgl2', glOpts) ??
+        canvas.getContext('webgl', glOpts)) as WebGLRenderingContext | null;
+      if (!gl) return;
 
-      const renderBiome = (b: ResolvedBiome, target: THREE.WebGLRenderTarget | null) => {
-        if (b === 'pixel-echo') {
-          blitUniforms.uTex.value = rtEchoRead.texture;
-          quadMesh.material = blitMat;
+      // Single fullscreen triangle (zero diagonal seam, minimal vertex overhead)
+      const triBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, triBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+      // Compile & link all shader programs up-front so scene switches have 0ms stutter
+      const vertShader = compileShader(gl, gl.VERTEX_SHADER, FULLSCREEN_VERTEX);
+      const programs: Record<Exclude<ResolvedBiome, 'pixel-echo'>, GlProgram> = {
+        'pixel-horizon': createProgram(gl, vertShader, PIXEL_HORIZON_FRAGMENT),
+        'pixel-plasma': createProgram(gl, vertShader, PIXEL_PLASMA_FRAGMENT),
+        'pixel-tunnel': createProgram(gl, vertShader, PIXEL_TUNNEL_FRAGMENT),
+        'pixel-kaleido': createProgram(gl, vertShader, PIXEL_KALEIDO_FRAGMENT),
+        'kinetic-type': createProgram(gl, vertShader, KINETIC_TYPE_FRAGMENT),
+      };
+      const echoProg = createProgram(gl, vertShader, PIXEL_ECHO_FRAGMENT);
+      const blitProg = createProgram(gl, vertShader, BLIT_FRAGMENT);
+      const compProg = createProgram(gl, vertShader, TRANSITION_COMPOSITE_FRAGMENT);
+      gl.deleteShader(vertShader);
+
+      // Native 8-bit render resolution (1/5 linear = 25x fewer fragment shader invocations)
+      const PIXEL_SCALE = 5;
+      const lowW = Math.max(1, Math.floor(width / PIXEL_SCALE));
+      const lowH = Math.max(1, Math.floor(height / PIXEL_SCALE));
+
+      const rtPrev = createTarget(gl, width, height);
+      const rtCurr = createTarget(gl, width, height);
+      const rtLow = createTarget(gl, lowW, lowH);
+      let rtEchoRead = createTarget(gl, lowW, lowH);
+      let rtEchoWrite = createTarget(gl, lowW, lowH);
+
+      const colPrimary: [number, number, number] = [0.2, 0.7, 1.0];
+      const colSecondary: [number, number, number] = [0.9, 0.4, 0.7];
+      const colAccent: [number, number, number] = [1.0, 0.9, 0.3];
+      const colBg: [number, number, number] = [0.04, 0.05, 0.09];
+      parseHexToRgb(trackRef.current.palette.primary, colPrimary);
+      parseHexToRgb(trackRef.current.palette.secondary, colSecondary);
+      parseHexToRgb(trackRef.current.palette.accent, colAccent);
+      parseHexToRgb(trackRef.current.palette.background, colBg);
+
+      const targetPrimary: [number, number, number] = [...colPrimary];
+      const targetSecondary: [number, number, number] = [...colSecondary];
+      const targetAccent: [number, number, number] = [...colAccent];
+      const targetBg: [number, number, number] = [...colBg];
+      let cachedPaletteKey = '';
+
+      let currentWidth = width;
+      let currentHeight = height;
+
+      const handleResize = () => {
+        if (!container) return;
+        const w = Math.max(1, container.clientWidth);
+        const h = Math.max(1, container.clientHeight);
+        if (w === currentWidth && h === currentHeight) return;
+        currentWidth = w;
+        currentHeight = h;
+        canvas.width = w;
+        canvas.height = h;
+        const lw = Math.max(1, Math.floor(w / PIXEL_SCALE));
+        const lh = Math.max(1, Math.floor(h / PIXEL_SCALE));
+        resizeTarget(gl, rtPrev, w, h);
+        resizeTarget(gl, rtCurr, w, h);
+        resizeTarget(gl, rtLow, lw, lh);
+        resizeTarget(gl, rtEchoRead, lw, lh);
+        resizeTarget(gl, rtEchoWrite, lw, lh);
+      };
+      window.addEventListener('resize', handleResize);
+      const resizeObserver =
+        typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
+      resizeObserver?.observe(container);
+
+      let rafId = 0;
+      let lastPerfMs = performance.now();
+      let elapsedSec = 0;
+      let flowTime = 0;
+      let smoothProgress = 0;
+      let prevBiome: ResolvedBiome = biomeRef.current;
+      let activeBiome: ResolvedBiome = biomeRef.current;
+      let transitionProgress = 1.0;
+      let shockAge = 1.0;
+      let shockOriginX = 0.5;
+      let shockOriginY = 0.5;
+      let lastAutoShockTime = -10;
+
+      const launchShockwave = (nx = 0.5, ny = 0.5) => {
+        shockOriginX = nx;
+        shockOriginY = ny;
+        shockAge = 0.0;
+      };
+      triggerShockRef.current = launchShockwave;
+
+      const handlePointerDown = (e: PointerEvent) => {
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        const nx = (e.clientX - rect.left) / rect.width;
+        const ny = 1.0 - (e.clientY - rect.top) / rect.height;
+        launchShockwave(nx, ny);
+      };
+      container.addEventListener('pointerdown', handlePointerDown);
+
+      const drawFullscreen = (prog: GlProgram, target: GlTarget | null) => {
+        if (target) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+          gl.viewport(0, 0, target.width, target.height);
         } else {
-          quadMesh.material = materials[b];
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, currentWidth, currentHeight);
         }
-        renderer.setRenderTarget(target);
-        renderer.render(scene, camera);
+        gl.bindBuffer(gl.ARRAY_BUFFER, triBuf);
+        gl.enableVertexAttribArray(prog.aPos);
+        gl.vertexAttribPointer(prog.aPos, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
       };
 
-      // Update echo ping-pong buffer once per frame whenever echo is visible
-      if (activeBiome === 'pixel-echo' || (transitionProgress < 0.999 && prevBiome === 'pixel-echo')) {
-        stepEcho();
-      }
+      const bindSharedUniforms = (prog: GlProgram, metrics: AudioMetrics) => {
+        const { u } = prog;
+        if (u.uTime) gl.uniform1f(u.uTime, flowTime);
+        if (u.uResolution) gl.uniform2f(u.uResolution, currentWidth, currentHeight);
+        if (u.uPrimary) gl.uniform3f(u.uPrimary, colPrimary[0], colPrimary[1], colPrimary[2]);
+        if (u.uSecondary) gl.uniform3f(u.uSecondary, colSecondary[0], colSecondary[1], colSecondary[2]);
+        if (u.uAccent) gl.uniform3f(u.uAccent, colAccent[0], colAccent[1], colAccent[2]);
+        if (u.uBg) gl.uniform3f(u.uBg, colBg[0], colBg[1], colBg[2]);
+        if (u.uBass) gl.uniform1f(u.uBass, metrics.bass);
+        if (u.uMid) gl.uniform1f(u.uMid, metrics.mid);
+        if (u.uTreble) gl.uniform1f(u.uTreble, metrics.treble);
+        if (u.uBeat) gl.uniform1f(u.uBeat, metrics.beat);
+        if (u.uProgress) gl.uniform1f(u.uProgress, smoothProgress);
+      };
 
-      const needsComposite = transitionProgress < 0.999 || shockAge < 0.999;
+      const renderFrame = () => {
+        const nowMs = performance.now();
+        const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastPerfMs) * 0.001));
+        lastPerfMs = nowMs;
+        elapsedSec += dt;
 
-      if (needsComposite) {
-        if (transitionProgress < 0.999) {
-          renderBiome(prevBiome, rtPrev);
+        const activeTrack = trackRef.current;
+        const nextBiome = biomeRef.current;
+
+        if (nextBiome !== activeBiome) {
+          prevBiome = activeBiome;
+          activeBiome = nextBiome;
+          transitionProgress = 0.0;
         }
-        renderBiome(activeBiome, rtCurr);
 
-        compUniforms.uTransition.value = transitionProgress;
-        compUniforms.uShockAge.value = shockAge;
-        renderer.setRenderTarget(null);
-        renderer.render(compScene, camera);
-      } else {
-        // Direct render (zero overhead when idle)
-        renderBiome(activeBiome, null);
-      }
-    };
+        if (transitionProgress < 1.0) {
+          transitionProgress = Math.min(1.0, transitionProgress + dt / 0.55);
+        }
 
-    renderOnceRef.current = renderFrame;
+        if (shockAge < 1.0) {
+          shockAge = Math.min(1.0, shockAge + dt / 0.65);
+        }
 
-    const animate = () => {
-      if (document.hidden) {
-        rafId = 0;
-        return;
-      }
-      rafId = requestAnimationFrame(animate);
-      renderFrame();
-    };
+        const metrics = metricsFnRef.current(elapsedSec, activeTrack.isPlaying);
+        onMetricsFrameRef.current?.(metrics);
 
-    const handleVisibility = () => {
-      if (document.hidden) {
-        if (rafId) {
-          cancelAnimationFrame(rafId);
+        if (
+          metrics.audioSource !== 'none' &&
+          metrics.beat > 0.72 &&
+          metrics.bass > 0.45 &&
+          elapsedSec - lastAutoShockTime > 1.0
+        ) {
+          lastAutoShockTime = elapsedSec;
+          launchShockwave(0.5, 0.5);
+        }
+
+        const speedScale = activeTrack.isPlaying ? 0.6 + metrics.energy * 1.9 : 0.18;
+        flowTime += dt * speedScale;
+
+        const pal = activeTrack.palette;
+        const palKey = `${pal.primary}${pal.secondary}${pal.accent}${pal.background}`;
+        if (palKey !== cachedPaletteKey) {
+          cachedPaletteKey = palKey;
+          parseHexToRgb(pal.primary, targetPrimary);
+          parseHexToRgb(pal.secondary, targetSecondary);
+          parseHexToRgb(pal.accent, targetAccent);
+          parseHexToRgb(pal.background, targetBg);
+        }
+
+        const colorLerp = 1 - Math.exp(-5.5 * dt);
+        lerpRgb(colPrimary, targetPrimary, colorLerp);
+        lerpRgb(colSecondary, targetSecondary, colorLerp);
+        lerpRgb(colAccent, targetAccent, colorLerp);
+        lerpRgb(colBg, targetBg, colorLerp);
+
+        const clock = clockRef.current;
+        const liveProgressMs = clock.isPlaying
+          ? clock.progressMs + (nowMs - clock.updatedAt)
+          : clock.progressMs;
+        const targetProgress = Math.min(
+          1,
+          Math.max(0, liveProgressMs / Math.max(1, activeTrack.durationMs))
+        );
+        smoothProgress += (targetProgress - smoothProgress) * (1 - Math.exp(-4.0 * dt));
+
+        const stepEcho = () => {
+          gl.useProgram(echoProg.program);
+          bindSharedUniforms(echoProg, metrics);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, rtEchoRead.tex);
+          if (echoProg.u.uFeedbackTex) gl.uniform1i(echoProg.u.uFeedbackTex, 0);
+          drawFullscreen(echoProg, rtEchoWrite);
+          const tmp = rtEchoRead;
+          rtEchoRead = rtEchoWrite;
+          rtEchoWrite = tmp;
+        };
+
+        const blitTexture = (tex: WebGLTexture, target: GlTarget | null) => {
+          gl.useProgram(blitProg.program);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          if (blitProg.u.uTex) gl.uniform1i(blitProg.u.uTex, 0);
+          drawFullscreen(blitProg, target);
+        };
+
+        const renderBiome = (b: ResolvedBiome, target: GlTarget | null) => {
+          if (b === 'pixel-echo') {
+            blitTexture(rtEchoRead.tex, target);
+          } else if (b === 'kinetic-type') {
+            const prog = programs[b];
+            gl.useProgram(prog.program);
+            bindSharedUniforms(prog, metrics);
+            drawFullscreen(prog, target);
+          } else {
+            const prog = programs[b];
+            gl.useProgram(prog.program);
+            bindSharedUniforms(prog, metrics);
+            drawFullscreen(prog, rtLow);
+            blitTexture(rtLow.tex, target);
+          }
+        };
+
+        if (activeBiome === 'pixel-echo' || (transitionProgress < 0.999 && prevBiome === 'pixel-echo')) {
+          stepEcho();
+        }
+
+        const needsComposite = transitionProgress < 0.999 || shockAge < 0.999;
+        if (needsComposite) {
+          if (transitionProgress < 0.999) {
+            renderBiome(prevBiome, rtPrev);
+          }
+          renderBiome(activeBiome, rtCurr);
+
+          gl.useProgram(compProg.program);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, rtPrev.tex);
+          if (compProg.u.uPrevTex) gl.uniform1i(compProg.u.uPrevTex, 0);
+
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, rtCurr.tex);
+          if (compProg.u.uCurrTex) gl.uniform1i(compProg.u.uCurrTex, 1);
+
+          if (compProg.u.uTransition) gl.uniform1f(compProg.u.uTransition, transitionProgress);
+          if (compProg.u.uShockAge) gl.uniform1f(compProg.u.uShockAge, shockAge);
+          if (compProg.u.uShockOrigin) gl.uniform2f(compProg.u.uShockOrigin, shockOriginX, shockOriginY);
+          if (compProg.u.uAccent) {
+            gl.uniform3f(compProg.u.uAccent, colAccent[0], colAccent[1], colAccent[2]);
+          }
+          if (compProg.u.uResolution) gl.uniform2f(compProg.u.uResolution, currentWidth, currentHeight);
+
+          drawFullscreen(compProg, null);
+        } else {
+          renderBiome(activeBiome, null);
+        }
+      };
+
+      renderOnceRef.current = renderFrame;
+
+      const animate = () => {
+        if (document.hidden) {
           rafId = 0;
+          return;
         }
-      } else if (!rafId) {
-        lastPerfMs = performance.now();
-        animate();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
+        rafId = requestAnimationFrame(animate);
+        renderFrame();
+      };
 
-    animate();
+      const handleVisibility = () => {
+        if (document.hidden) {
+          if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = 0;
+          }
+        } else if (!rafId) {
+          lastPerfMs = performance.now();
+          animate();
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibility);
 
-    return () => {
-      cancelAnimationFrame(rafId);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', handleResize);
-      container.removeEventListener('pointerdown', handlePointerDown);
-      renderOnceRef.current = null;
-      triggerShockRef.current = null;
-      rtPrev.dispose();
-      rtCurr.dispose();
-      rtEchoRead.dispose();
-      rtEchoWrite.dispose();
-      quadGeo.dispose();
-      echoMat.dispose();
-      blitMat.dispose();
-      compMat.dispose();
-      Object.values(materials).forEach((m) => m.dispose());
-      renderer.dispose();
-      if (renderer.domElement.parentNode === container) {
-        container.removeChild(renderer.domElement);
-      }
-    };
-  }, [clockRef]);
+      animate();
 
-  return <div ref={containerRef} className="stage-canvas" />;
+      return () => {
+        cancelAnimationFrame(rafId);
+        document.removeEventListener('visibilitychange', handleVisibility);
+        resizeObserver?.disconnect();
+        window.removeEventListener('resize', handleResize);
+        container.removeEventListener('pointerdown', handlePointerDown);
+        renderOnceRef.current = null;
+        triggerShockRef.current = null;
+        canvasRef.current = null;
+
+        const disposeTarget = (t: GlTarget) => {
+          gl.deleteTexture(t.tex);
+          gl.deleteFramebuffer(t.fbo);
+        };
+        disposeTarget(rtPrev);
+        disposeTarget(rtCurr);
+        disposeTarget(rtLow);
+        disposeTarget(rtEchoRead);
+        disposeTarget(rtEchoWrite);
+        gl.deleteBuffer(triBuf);
+        Object.values(programs).forEach((p) => gl.deleteProgram(p.program));
+        gl.deleteProgram(echoProg.program);
+        gl.deleteProgram(blitProg.program);
+        gl.deleteProgram(compProg.program);
+
+        if (canvas.parentNode === container) {
+          container.removeChild(canvas);
+        }
+      };
+    }, [clockRef]);
+
+    return <div ref={containerRef} className="stage-canvas" />;
   })
 );
