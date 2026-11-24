@@ -71,8 +71,8 @@ export function measureWordDimensions(
     width = Math.max(fontSize * 0.7, display.length * fontSize * charFactor + 18);
   }
 
-  const height = fontSize * (variant === 'serif' ? 1.06 : 1.02);
-  return { width: Math.ceil(width), height: Math.ceil(height) };
+  const height = fontSize * (variant === 'serif' ? 1.18 : 1.14);
+  return { width: Math.ceil(width + fontSize * 0.16), height: Math.ceil(height) };
 }
 
 function makeBox(cx: number, cy: number, w: number, h: number, rot: number): WorldBox {
@@ -226,10 +226,10 @@ export function layoutLineInWorld(
       }
     }
 
-    // Fit camera zoom so the active word always fills the frame nicely with generous margins
-    const targetFitWidth = 860;
-    const rawZoom = Math.min(1.26, Math.max(0.74, targetFitWidth / Math.max(380, w * 1.45)));
-    const zoom = Number((isHero ? Math.min(1.3, rawZoom * 1.06) : rawZoom).toFixed(3));
+    // Fit camera zoom so even very long words stay fully inside viewport with generous margins
+    const targetFitWidth = 940;
+    const rawZoom = Math.min(1.24, Math.max(0.48, targetFitWidth / Math.max(380, w * 1.28)));
+    const zoom = Number((isHero ? Math.min(1.26, rawZoom * 1.04) : rawZoom).toFixed(3));
 
     placed.push({
       id: `${trackId}-${lineIdx}-${i}-${word}`,

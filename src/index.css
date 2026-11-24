@@ -1910,7 +1910,8 @@ body,
   font-size: var(--wsize, 80px);
   font-weight: 800;
   letter-spacing: -0.045em;
-  line-height: 0.94;
+  line-height: 1.06;
+  padding: 0.12em 0.1em 0.18em 0.1em;
   text-transform: lowercase;
   color: var(--ae-ink);
   transform-origin: center center;
@@ -1934,14 +1935,14 @@ body,
   font-family: 'Playfair Display', 'Instrument Serif', Georgia, serif;
   font-weight: 700;
   letter-spacing: -0.03em;
-  line-height: 0.92;
+  line-height: 1.06;
 }
 
 .ae-world-word.variant-hero .ae-world-word-text {
   font-family: 'Rubik', 'Manrope', sans-serif;
   font-weight: 700;
   letter-spacing: -0.04em;
-  line-height: 0.94;
+  line-height: 1.06;
 }
 
 /* Keep the authentic video font pairing in Type scene even when global Pixel/Brutal font is active */
@@ -2060,11 +2061,11 @@ body,
 
 @keyframes aeWordWipe {
   0% {
-    clip-path: inset(0 100% 0 0);
+    clip-path: inset(-12% 100% -18% -12%);
     transform: translate3d(-12px, 0, 0);
   }
   100% {
-    clip-path: inset(0 0 0 0);
+    clip-path: inset(-12% -12% -18% -12%);
     transform: translate3d(0, 0, 0) scale(calc(1.02 + var(--beat, 0) * 0.03));
   }
 }

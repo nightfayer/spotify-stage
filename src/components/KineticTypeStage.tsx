@@ -18,7 +18,8 @@ interface KineticTypeStageProps {
 
 function getViewportScale(): number {
   if (typeof window === 'undefined') return 1;
-  return Number(Math.min(1.3, Math.max(0.55, window.innerWidth / 1280)).toFixed(3));
+  const scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+  return Number(Math.min(1.3, Math.max(0.45, scale)).toFixed(3));
 }
 
 export const KineticTypeStage = memo(function KineticTypeStage({
