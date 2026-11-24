@@ -228,14 +228,21 @@ export async function fetchSyncedLyrics(
       if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
     }
 
-    // 3. Title-only full-text search (crucial for Russian tracks where Spotify uses Latin artist names
-    //    like "Skriptonit"/"Basta" while LRCLIB stores Cyrillic "Скриптонит"/"Баста")
-    const titleOnlyResults = await queryLrcSearch(
-      new URLSearchParams({ q: cleanedTitle }),
-      signal
-    );
-    if (titleOnlyResults.length > 0) {
-      const picked = pickBestResult(titleOnlyResults, artist, cleanedTitle, durationSec);
+    // 3. Combined full-text search (artist + title) — crucial for common titles & collabs/features
+    const allArtists = artist
+      .split(/,|&|\bx\b/i)
+      .map((a) => a.trim())
+      .filter(Boolean);
+    const searchQueries = [`${cleanArtist} ${cleanedTitle}`];
+    if (allArtists.length > 1) {
+      searchQueries.push(`${allArtists[1]} ${cleanedTitle}`);
+    }
+    searchQueries.push(cleanedTitle);
+
+    for (const q of searchQueries) {
+      const results = await queryLrcSearch(new URLSearchParams({ q }), signal);
+      if (results.length === 0) continue;
+      const picked = pickBestResult(results, artist, cleanedTitle, durationSec);
       if (picked.syncedLyrics) {
         const parsed = parseLrc(picked.syncedLyrics);
         lyricsCache.set(cacheKey, parsed);
