@@ -1,34 +1,148 @@
 import type { LyricLine } from '../types';
 
-const LRC_LINE_RE = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+const LRC_TAG_RE = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
 export function parseLrc(lrcText: string): LyricLine[] {
   const lines: LyricLine[] = [];
 
-  for (const rawLine of lrcText.split('\n')) {
-    const match = LRC_LINE_RE.exec(rawLine.trim());
-    if (!match) continue;
+  for (const rawLine of lrcText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
 
-    const minutes = Number(match[1]);
-    const seconds = Number(match[2]);
-    const frac = match[3].length === 2 ? Number(match[3]) * 10 : Number(match[3]);
-    const text = match[4].trim();
+    const timestamps: number[] = [];
+    let match: RegExpExecArray | null;
+    LRC_TAG_RE.lastIndex = 0;
+    while ((match = LRC_TAG_RE.exec(trimmed)) !== null) {
+      const minutes = Number(match[1]);
+      const seconds = Number(match[2]);
+      const rawFrac = match[3] ?? '0';
+      const frac =
+        rawFrac.length === 1
+          ? Number(rawFrac) * 100
+          : rawFrac.length === 2
+            ? Number(rawFrac) * 10
+            : Number(rawFrac);
+      timestamps.push(minutes * 60_000 + seconds * 1000 + frac);
+    }
 
+    if (timestamps.length === 0) continue;
+    const text = trimmed.replace(LRC_TAG_RE, '').trim();
     if (!text) continue;
-    lines.push({
-      timeMs: minutes * 60_000 + seconds * 1000 + frac,
-      text,
-    });
+
+    for (const timeMs of timestamps) {
+      lines.push({ timeMs, text });
+    }
   }
 
   return lines.sort((a, b) => a.timeMs - b.timeMs);
+}
+
+const CYR_TO_LAT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z',
+  и: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
+  с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch',
+  ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+};
+
+/**
+ * Normalizes Cyrillic & Latin strings to a common lowercase ASCII form so
+ * Spotify Latinized Russian artists ("Skriptonit", "KINO", "Basta") match
+ * Cyrillic LRCLIB entries ("Скриптонит", "Кино", "Баста").
+ */
+export function normalizeForMatch(input: string): string {
+  let out = '';
+  for (const ch of input.toLowerCase()) {
+    out += CYR_TO_LAT[ch] ?? ch;
+  }
+  return out
+    .replace(/ee/g, 'i')
+    .replace(/oo/g, 'u')
+    .replace(/c(?=[ei])/g, 's')
+    .replace(/c/g, 'k')
+    .replace(/x/g, 'ks')
+    .replace(/y/g, 'i')
+    .replace(/kh/g, 'h')
+    .replace(/([a-z])\1+/g, '$1')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function artistMatches(spotifyArtist: string, candidateArtist: string): boolean {
+  const normCand = normalizeForMatch(candidateArtist);
+  if (!normCand) return false;
+
+  // Split multi-artist credits ("Miyagi & Эндшпиль", "Баста, Скриптонит", "A x B")
+  const parts = spotifyArtist
+    .split(/,|&|\bx\b|\bfeat\.?\b|\bft\.?\b|\bпри уч\.?\b/i)
+    .map((p) => normalizeForMatch(p))
+    .filter((p) => p.length >= 2);
+
+  if (parts.length === 0) return false;
+  return parts.some((p) => normCand.includes(p) || p.includes(normCand));
+}
+
+interface LrcLibItem {
+  trackName?: string;
+  artistName?: string;
+  duration?: number;
+  syncedLyrics?: string | null;
+  plainLyrics?: string | null;
+}
+
+function pickBestResult(
+  results: LrcLibItem[],
+  spotifyArtist: string,
+  cleanedTitle: string,
+  durationSec: number
+): { syncedLyrics: string | null; plainLyrics: string | null } {
+  const normTitle = normalizeForMatch(cleanedTitle);
+
+  const scoreItem = (item: LrcLibItem): number => {
+    const durDiff = Math.abs((item.duration ?? durationSec) - durationSec);
+    const hasArtist = item.artistName ? artistMatches(spotifyArtist, item.artistName) : false;
+    const normItemTitle = item.trackName ? normalizeForMatch(cleanTrackTitle(item.trackName)) : '';
+    const titleExact = normTitle.length > 0 && normItemTitle === normTitle;
+    const titleContains =
+      normTitle.length > 0 &&
+      (normItemTitle.includes(normTitle) || normTitle.includes(normItemTitle));
+
+    // Always require artist match so unrelated songs sharing a common title (e.g. "Риски") never bleed in
+    if (!hasArtist) return -1;
+    if (!titleExact && !titleContains) return -1;
+    if (durDiff > 18) return -1;
+
+    let score = 50;
+    if (titleExact) score += 30;
+    else if (titleContains) score += 15;
+    if (durDiff <= 2) score += 25;
+    else if (durDiff <= 5) score += 15;
+    else if (durDiff <= 10) score += 5;
+    return score;
+  };
+
+  const scored = results
+    .map((item) => ({ item, score: scoreItem(item) }))
+    .filter((x) => x.score >= 30)
+    .sort((a, b) => b.score - a.score);
+
+  const bestSynced = scored.find(
+    (x) => typeof x.item.syncedLyrics === 'string' && x.item.syncedLyrics.trim().length > 0
+  );
+  if (bestSynced?.item.syncedLyrics) {
+    return { syncedLyrics: bestSynced.item.syncedLyrics, plainLyrics: null };
+  }
+
+  const bestPlain = scored.find(
+    (x) => typeof x.item.plainLyrics === 'string' && x.item.plainLyrics.trim().length > 0
+  );
+  return { syncedLyrics: null, plainLyrics: bestPlain?.item.plainLyrics ?? null };
 }
 
 const lyricsCache = new Map<string, LyricLine[]>();
 
 export function cleanTrackTitle(raw: string): string {
   return raw
-    .replace(/\s*\((?:feat\.?|ft\.?|with|remaster(?:ed)?|live|acoustic|deluxe|radio edit|bonus track|version|edit|mono|stereo)[^)]*\)/gi, '')
+    .replace(/\s*\((?:feat\.?|ft\.?|with|при уч\.?|remaster(?:ed)?|live|acoustic|deluxe|radio edit|bonus track|version|edit|mono|stereo)[^)]*\)/gi, '')
     .replace(/\s*\[[^\]]*(?:remaster|live|edit|feat|ft|version|deluxe)[^\]]*\]/gi, '')
     .replace(/\s+-\s+(?:\d{4}\s+)?(?:remaster(?:ed)?|single version|radio edit|live|acoustic|mono|stereo).*$/i, '')
     .trim();
@@ -56,6 +170,13 @@ export function buildPlainLyrics(plainText: string, durationMs: number): LyricLi
   }));
 }
 
+async function queryLrcSearch(params: URLSearchParams, signal?: AbortSignal): Promise<LrcLibItem[]> {
+  const res = await fetch(`https://lrclib.net/api/search?${params.toString()}`, { signal });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? (data as LrcLibItem[]) : [];
+}
+
 export async function fetchSyncedLyrics(
   artist: string,
   title: string,
@@ -63,6 +184,7 @@ export async function fetchSyncedLyrics(
   signal?: AbortSignal
 ): Promise<LyricLine[]> {
   const cleanArtist = artist.split(',')[0].trim();
+  const cleanedTitle = cleanTrackTitle(title) || title;
   const durationSec = Math.round(durationMs / 1000);
   const cacheKey = `${cleanArtist.toLowerCase()}::${title.toLowerCase()}::${durationSec}`;
   const cached = lyricsCache.get(cacheKey);
@@ -72,13 +194,13 @@ export async function fetchSyncedLyrics(
     let fallbackPlain: string | null = null;
 
     // 1. Exact lookup via /api/get
-    const params = new URLSearchParams({
+    const getParams = new URLSearchParams({
       artist_name: cleanArtist,
       track_name: title,
       duration: String(durationSec),
     });
 
-    const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { signal });
+    const res = await fetch(`https://lrclib.net/api/get?${getParams.toString()}`, { signal });
     if (res.ok) {
       const data = await res.json();
       if (data?.syncedLyrics) {
@@ -91,40 +213,35 @@ export async function fetchSyncedLyrics(
       }
     }
 
-    // 2. Fallback search with cleaned track title (handles "(Remastered 2011)", "(feat. ...)", etc.)
-    const cleanedTitle = cleanTrackTitle(title) || title;
-    const searchParams = new URLSearchParams({
-      artist_name: cleanArtist,
-      track_name: cleanedTitle,
-    });
-    const searchRes = await fetch(`https://lrclib.net/api/search?${searchParams.toString()}`, {
-      signal,
-    });
-    if (searchRes.ok) {
-      const results = await searchRes.json();
-      if (Array.isArray(results)) {
-        const withSynced = results.filter(
-          (item: { syncedLyrics?: string; duration?: number }) =>
-            typeof item?.syncedLyrics === 'string' && item.syncedLyrics.trim().length > 0
-        );
-        if (withSynced.length > 0) {
-          withSynced.sort(
-            (a: { duration?: number }, b: { duration?: number }) =>
-              Math.abs((a.duration ?? durationSec) - durationSec) -
-              Math.abs((b.duration ?? durationSec) - durationSec)
-          );
-          const parsed = parseLrc(withSynced[0].syncedLyrics);
-          lyricsCache.set(cacheKey, parsed);
-          return parsed;
-        }
-        if (!fallbackPlain) {
-          const withPlain = results.find(
-            (item: { plainLyrics?: string }) =>
-              typeof item?.plainLyrics === 'string' && item.plainLyrics.trim().length > 0
-          );
-          if (withPlain) fallbackPlain = withPlain.plainLyrics;
-        }
+    // 2. Structured search with cleaned title & primary artist
+    const structuredResults = await queryLrcSearch(
+      new URLSearchParams({ artist_name: cleanArtist, track_name: cleanedTitle }),
+      signal
+    );
+    if (structuredResults.length > 0) {
+      const picked = pickBestResult(structuredResults, artist, cleanedTitle, durationSec);
+      if (picked.syncedLyrics) {
+        const parsed = parseLrc(picked.syncedLyrics);
+        lyricsCache.set(cacheKey, parsed);
+        return parsed;
       }
+      if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
+    }
+
+    // 3. Title-only full-text search (crucial for Russian tracks where Spotify uses Latin artist names
+    //    like "Skriptonit"/"Basta" while LRCLIB stores Cyrillic "Скриптонит"/"Баста")
+    const titleOnlyResults = await queryLrcSearch(
+      new URLSearchParams({ q: cleanedTitle }),
+      signal
+    );
+    if (titleOnlyResults.length > 0) {
+      const picked = pickBestResult(titleOnlyResults, artist, cleanedTitle, durationSec);
+      if (picked.syncedLyrics) {
+        const parsed = parseLrc(picked.syncedLyrics);
+        lyricsCache.set(cacheKey, parsed);
+        return parsed;
+      }
+      if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
     }
 
     if (fallbackPlain) {
@@ -143,12 +260,50 @@ export async function fetchSyncedLyrics(
 export interface ActiveLyricState {
   index: number;
   text: string;
+  prev2Text: string | null;
   prevText: string | null;
   nextText: string | null;
+  next2Text: string | null;
   words: string[];
   activeWordIndex: number;
   lineStartMs: number;
   lineDurationMs: number;
+}
+
+/**
+ * Returns true when playback is in an intro (>3.5s before first line) or
+ * an instrumental interlude gap between vocal lines (for Apple Music Sing-style beat dots).
+ */
+export function isInstrumentalGap(lines: LyricLine[], progressMs: number): boolean {
+  if (lines.length === 0) return false;
+
+  const firstTime = lines[0].timeMs;
+  if (progressMs < firstTime) {
+    return firstTime >= 3500 && firstTime - progressMs > 600;
+  }
+
+  let lo = 0;
+  let hi = lines.length - 1;
+  let activeIdx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].timeMs <= progressMs) {
+      activeIdx = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  if (activeIdx === -1 || activeIdx + 1 >= lines.length) return false;
+  const current = lines[activeIdx];
+  const next = lines[activeIdx + 1];
+  const gap = next.timeMs - current.timeMs;
+  if (gap < 7500) return false;
+
+  const elapsed = progressMs - current.timeMs;
+  const remaining = next.timeMs - progressMs;
+  return elapsed > 4800 && remaining > 650;
 }
 
 export function getActiveLyricState(
@@ -188,8 +343,10 @@ export function getActiveLyricState(
   return {
     index: activeIdx,
     text: current.text,
+    prev2Text: activeIdx > 1 ? lines[activeIdx - 2].text : null,
     prevText: activeIdx > 0 ? lines[activeIdx - 1].text : null,
     nextText: activeIdx + 1 < lines.length ? lines[activeIdx + 1].text : null,
+    next2Text: activeIdx + 2 < lines.length ? lines[activeIdx + 2].text : null,
     words,
     activeWordIndex,
     lineStartMs: current.timeMs,

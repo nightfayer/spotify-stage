@@ -3,22 +3,32 @@ import {
   buildPlainLyrics,
   cleanTrackTitle,
   getActiveLyricState,
+  isInstrumentalGap,
+  normalizeForMatch,
   parseLrc,
 } from '../lyrics';
 import { ensureReadablePalette, resolveBiomeForGenres } from '../palette';
 
 describe('lyrics utilities', () => {
-  it('parses synced LRC lines and sorts chronologically', () => {
+  it('parses synced LRC lines including multi-timestamp choruses and 1-digit minutes', () => {
     const lrc = `
-      [00:12.50] Second line
-      [00:05.125] First line
+      [00:12.50][01:05.00] Припев строки
+      [0:05.125] First line
       [00:15.00]
     `;
     const parsed = parseLrc(lrc);
     expect(parsed).toEqual([
       { timeMs: 5125, text: 'First line' },
-      { timeMs: 12500, text: 'Second line' },
+      { timeMs: 12500, text: 'Припев строки' },
+      { timeMs: 65000, text: 'Припев строки' },
     ]);
+  });
+
+  it('transliterates Cyrillic artists to match Latinized Spotify names', () => {
+    expect(normalizeForMatch('Скриптонит')).toBe(normalizeForMatch('Skriptonit'));
+    expect(normalizeForMatch('Кино')).toBe(normalizeForMatch('KINO'));
+    expect(normalizeForMatch('Баста')).toBe(normalizeForMatch('Basta'));
+    expect(normalizeForMatch('Егор Крид')).toBe(normalizeForMatch('Egor Kreed'));
   });
 
   it('cleans remaster, feat, and radio edit suffixes from track titles', () => {
@@ -38,6 +48,18 @@ describe('lyrics utilities', () => {
     expect(state?.nextText).toBe('Next verse here');
     expect(state?.words).toEqual(['Hello', 'bright', 'world']);
     expect(state?.activeWordIndex).toBeGreaterThanOrEqual(1);
+  });
+
+  it('detects intro and mid-track instrumental gaps for beat dots', () => {
+    const lines = [
+      { timeMs: 8000, text: 'First verse' },
+      { timeMs: 22000, text: 'After instrumental break' },
+    ];
+    expect(isInstrumentalGap(lines, 2000)).toBe(true);
+    expect(isInstrumentalGap(lines, 7800)).toBe(false);
+    expect(isInstrumentalGap(lines, 9000)).toBe(false);
+    expect(isInstrumentalGap(lines, 15000)).toBe(true);
+    expect(isInstrumentalGap(lines, 21700)).toBe(false);
   });
 
   it('distributes plainLyrics across playable track duration', () => {

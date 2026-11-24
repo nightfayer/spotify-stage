@@ -1735,3 +1735,141 @@ body,
   color: #ffffff;
   white-space: nowrap;
 }
+
+/* Instrumental Interlude Beat Dots (Apple Music Sing-inspired) */
+.interlude-dots {
+  position: fixed;
+  left: 50%;
+  top: 48%;
+  transform: translate(-50%, -50%) scale(calc(1 + var(--beat, 0) * 0.14));
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+  animation: interludeFadeIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.interlude-dots.is-in-type {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: scale(calc(1 + var(--beat, 0) * 0.14));
+}
+
+@keyframes interludeFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.interlude-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--lyric-accent, var(--reel-accent, #ffffff));
+  box-shadow: 0 0 calc(10px + var(--beat, 0) * 18px) var(--lyric-accent, var(--reel-accent, rgba(255, 255, 255, 0.7)));
+  animation: interludePulse 1.5s ease-in-out infinite;
+}
+
+.interlude-dot:nth-child(2) {
+  animation-delay: 0.22s;
+}
+
+.interlude-dot:nth-child(3) {
+  animation-delay: 0.44s;
+}
+
+.interlude-dots.is-pixel-font .interlude-dot,
+.font-pixel .interlude-dots .interlude-dot {
+  border-radius: 0;
+  width: 11px;
+  height: 11px;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.65);
+}
+
+@keyframes interludePulse {
+  0%, 100% {
+    opacity: 0.32;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+/* 5-Line Depth-of-Field Focus Scroll Enhancements */
+.lyrics-scroll-stack .scroll-line.is-prev-far,
+.lyrics-scroll-stack .scroll-line.is-next-far {
+  font-size: clamp(1rem, 1.8vw, 1.45rem);
+  color: rgba(255, 255, 255, 0.18);
+  filter: blur(2.8px);
+  transform: scale(0.92);
+  transition: opacity 0.35s ease, filter 0.35s ease, transform 0.35s ease;
+}
+
+.lyrics-scroll-stack .scroll-line.is-prev,
+.lyrics-scroll-stack .scroll-line.is-next {
+  filter: blur(1.1px);
+  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+}
+
+/* Word Lift + Subtle Chromatic Kick on Active Word (zero JS overhead, driven by --beat) */
+.lyric-word.is-active-word {
+  display: inline-block;
+  transform: translate3d(0, calc(-3px - var(--beat, 0) * 4px), 0) scale(calc(1.02 + var(--beat, 0) * 0.04));
+  text-shadow:
+    calc(var(--beat, 0) * -2.2px) 0 0 color-mix(in srgb, var(--lyric-primary, #38bdf8) 55%, transparent),
+    calc(var(--beat, 0) * 2.2px) 0 0 color-mix(in srgb, var(--lyric-accent, #fde047) 55%, transparent),
+    0 6px 24px rgba(0, 0, 0, 0.55);
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reels-word-mask.is-active .reels-word-inner {
+  transform: translate3d(0, calc(-2px - var(--beat, 0) * 5px), 0);
+  text-shadow:
+    calc(var(--beat, 0) * -2.5px) 0 0 color-mix(in srgb, var(--reel-primary, #38bdf8) 45%, transparent),
+    calc(var(--beat, 0) * 2.5px) 0 0 color-mix(in srgb, var(--reel-accent, #fde047) 45%, transparent);
+}
+
+/* Variable Font Beat Breathing for Brutal (Unbounded) */
+.is-brutal-font .lyric-word.is-active-word,
+.font-brutal .reels-word-mask.is-active .reels-word-inner {
+  font-variation-settings: 'wght' calc(680 + var(--beat, 0) * 220);
+}
+
+/* New Type Scene Shot: Neon Highlighter Fill (driven by 60 FPS --word-fill) */
+.reels-shot.shot-highlighter .reels-words {
+  justify-content: center;
+  gap: 0.22em 0.34em;
+}
+
+.reels-shot.shot-highlighter .reels-word-mask {
+  padding: 0.04em 0.2em;
+  border-radius: 6px;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--reel-accent) 88%, transparent) var(--word-fill, 0%),
+    rgba(255, 255, 255, 0.06) var(--word-fill, 0%)
+  );
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reels-shot.shot-highlighter .reels-word-mask.is-active,
+.reels-shot.shot-highlighter .reels-word-mask.is-spoken {
+  color: #090d16;
+}
+
+.reels-shot.shot-highlighter .reels-word-mask.is-active .reels-word-inner,
+.reels-shot.shot-highlighter .reels-word-mask.is-spoken .reels-word-inner {
+  background: none;
+  -webkit-text-fill-color: #090d16;
+  color: #090d16;
+  text-shadow: none;
+}

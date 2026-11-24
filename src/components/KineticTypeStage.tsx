@@ -6,6 +6,7 @@ import { BouncingBall, type PlaybackClock } from './BouncingBall';
 interface KineticTypeStageProps {
   track: TrackState;
   activeLyric: ActiveLyricState | null;
+  isInterlude: boolean;
   beatRef: React.RefObject<HTMLDivElement | null>;
   clockRef: React.RefObject<PlaybackClock>;
   showBall: boolean;
@@ -16,6 +17,7 @@ interface KineticTypeStageProps {
 const SHOT_STYLES = [
   'shot-hero-italic',
   'shot-outline-fill',
+  'shot-highlighter',
   'shot-mirror-echo',
   'shot-staircase',
   'shot-marker-pop',
@@ -43,7 +45,7 @@ function pickHeroWordIndex(words: string[]): number {
   let bestIdx = 0;
   let bestLen = 0;
   for (let i = 0; i < words.length; i++) {
-    const cleanLen = words[i].replace(/[^a-zA-Zа-яА-Я0-9]/g, '').length;
+    const cleanLen = words[i].replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '').length;
     if (cleanLen >= bestLen) {
       bestLen = cleanLen;
       bestIdx = i;
@@ -55,6 +57,7 @@ function pickHeroWordIndex(words: string[]): number {
 export const KineticTypeStage = memo(function KineticTypeStage({
   track,
   activeLyric,
+  isInterlude,
   beatRef,
   clockRef,
   showBall,
@@ -193,48 +196,56 @@ export const KineticTypeStage = memo(function KineticTypeStage({
         </div>
       )}
 
-      {/* Active Editorial Montage Shot */}
-      <div
-        className={`reels-shot is-entering ${currentShot.shotClass} ${currentShot.camClass}`}
-        key={`curr-${currentShot.key}`}
-      >
-        <div className="reels-words" ref={wordsContainerRef}>
-          {activeLyric && (
-            <BouncingBall
-              containerRef={wordsContainerRef}
-              clockRef={clockRef}
-              lineStartMs={activeLyric.lineStartMs}
-              lineDurationMs={activeLyric.lineDurationMs}
-              wordCount={currentShot.words.length}
-              lineKey={currentShot.key}
-              wordSelector=".reels-word-mask"
-              topOffset={6}
-              visible={showBall}
-              lyricOffsetMs={lyricOffsetMs}
-            />
-          )}
-          {currentShot.words.map((word, wIdx) => {
-            const isHero = wIdx === currentShot.heroWordIdx;
-            const stateClass =
-              wIdx === activeWordIdx
-                ? 'is-active'
-                : wIdx < activeWordIdx
-                  ? 'is-spoken'
-                  : 'is-upcoming';
-            return (
-              <span
-                key={`${wIdx}-${word}`}
-                className={`reels-word-mask ${isHero ? 'is-hero' : ''} ${stateClass}`}
-                style={{ '--word-i': wIdx } as React.CSSProperties}
-              >
-                <span className="reels-word-inner" data-word={word}>
-                  {word}
-                </span>
-              </span>
-            );
-          })}
+      {/* Instrumental Interlude Beat Dots OR Active Editorial Montage Shot */}
+      {isInterlude ? (
+        <div className="interlude-dots is-in-type" aria-hidden="true">
+          <span className="interlude-dot" />
+          <span className="interlude-dot" />
+          <span className="interlude-dot" />
         </div>
-      </div>
+      ) : (
+        <div
+          className={`reels-shot is-entering ${currentShot.shotClass} ${currentShot.camClass}`}
+          key={`curr-${currentShot.key}`}
+        >
+          <div className="reels-words" ref={wordsContainerRef}>
+            {activeLyric && (
+              <BouncingBall
+                containerRef={wordsContainerRef}
+                clockRef={clockRef}
+                lineStartMs={activeLyric.lineStartMs}
+                lineDurationMs={activeLyric.lineDurationMs}
+                wordCount={currentShot.words.length}
+                lineKey={currentShot.key}
+                wordSelector=".reels-word-mask"
+                topOffset={6}
+                visible={showBall}
+                lyricOffsetMs={lyricOffsetMs}
+              />
+            )}
+            {currentShot.words.map((word, wIdx) => {
+              const isHero = wIdx === currentShot.heroWordIdx;
+              const stateClass =
+                wIdx === activeWordIdx
+                  ? 'is-active'
+                  : wIdx < activeWordIdx
+                    ? 'is-spoken'
+                    : 'is-upcoming';
+              return (
+                <span
+                  key={`${wIdx}-${word}`}
+                  className={`reels-word-mask ${isHero ? 'is-hero' : ''} ${stateClass}`}
+                  style={{ '--word-i': wIdx } as React.CSSProperties}
+                >
+                  <span className="reels-word-inner" data-word={word}>
+                    {word}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 });

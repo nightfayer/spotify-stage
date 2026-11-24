@@ -24,7 +24,12 @@ import { StageCanvas, type StageCanvasHandle } from './components/StageCanvas';
 import { SpotifyConnectModal } from './components/SpotifyConnectModal';
 import { LiveAudioAnalyzer } from './lib/audio';
 import { DEMO_LYRICS, DEMO_TRACKS } from './lib/demoTracks';
-import { fetchSyncedLyrics, getActiveLyricState, type ActiveLyricState } from './lib/lyrics';
+import {
+  fetchSyncedLyrics,
+  getActiveLyricState,
+  isInstrumentalGap,
+  type ActiveLyricState,
+} from './lib/lyrics';
 import {
   extractPaletteFromImage,
   PALETTE_PRESETS,
@@ -163,6 +168,7 @@ export function App() {
     isPlaying: DEMO_TRACKS[0].isPlaying,
   });
   const [activeLyric, setActiveLyric] = useState<StyledLyricState | null>(null);
+  const [isInterlude, setIsInterlude] = useState(false);
 
   const hudLayerRef = useRef<HTMLDivElement | null>(null);
   const lastVjSwitchRef = useRef<number>(Date.now());
@@ -504,6 +510,7 @@ export function App() {
     let rafId = 0;
     let lastSecond = -1;
     let lastLyricKey = '';
+    let lastInterlude = false;
     let lastShowUpNext = false;
     const durationMs = Math.max(1, track.durationMs);
     const formattedDuration = formatTime(durationMs);
@@ -548,16 +555,27 @@ export function App() {
         }
       }
 
-      // 3. Frame-accurate lyric line & word trigger (re-renders ONLY when line or word changes)
+      // 3. Frame-accurate lyric line & word trigger + instrumental interlude detection
       if (lyricMode === 'off' || lyrics.length === 0) {
         if (lastLyricKey !== 'off') {
           lastLyricKey = 'off';
           setActiveLyric(null);
         }
+        if (lastInterlude) {
+          lastInterlude = false;
+          setIsInterlude(false);
+        }
         return;
       }
 
-      const state = getActiveLyricState(lyrics, liveMs + lyricOffsetMs);
+      const lyricTimeMs = liveMs + lyricOffsetMs;
+      const inGap = isInstrumentalGap(lyrics, lyricTimeMs);
+      if (inGap !== lastInterlude) {
+        lastInterlude = inGap;
+        setIsInterlude(inGap);
+      }
+
+      const state = getActiveLyricState(lyrics, lyricTimeMs);
       const nextKey = state ? `${state.index}:${state.activeWordIndex}` : 'none';
       if (nextKey !== lastLyricKey) {
         lastLyricKey = nextKey;
@@ -931,6 +949,7 @@ export function App() {
         <KineticTypeStage
           track={effectiveTrack}
           activeLyric={activeLyric}
+          isInterlude={isInterlude}
           beatRef={lyricsOverlayRef}
           clockRef={playbackClockRef}
           showBall={bouncingBall}
@@ -939,9 +958,32 @@ export function App() {
         />
       )}
 
-      {/* Lyrics Overlay: Kinetic Mode OR 3-Line Scroll Mode */}
+      {/* Instrumental Interlude Beat Dots over WebGL scenes */}
+      {resolvedBiome !== 'kinetic-type' &&
+        isInterlude &&
+        !titleCardTrack &&
+        lyricMode !== 'off' && (
+          <div
+            ref={lyricsOverlayRef}
+            className={`interlude-dots ${fontStyle === 'pixel' ? 'is-pixel-font' : ''}`}
+            style={
+              {
+                '--lyric-accent': effectiveTrack.palette.accent,
+                '--lyric-primary': effectiveTrack.palette.primary,
+              } as React.CSSProperties
+            }
+            aria-hidden="true"
+          >
+            <span className="interlude-dot" />
+            <span className="interlude-dot" />
+            <span className="interlude-dot" />
+          </div>
+        )}
+
+      {/* Lyrics Overlay: Kinetic Mode OR 5-Line Depth-of-Field Scroll Mode */}
       {resolvedBiome !== 'kinetic-type' &&
         activeLyric &&
+        !isInterlude &&
         !titleCardTrack &&
         lyricMode === 'kinetic' && (
         <div
@@ -987,6 +1029,7 @@ export function App() {
 
       {resolvedBiome !== 'kinetic-type' &&
         activeLyric &&
+        !isInterlude &&
         !titleCardTrack &&
         lyricMode === 'scroll' && (
         <div
@@ -999,6 +1042,7 @@ export function App() {
             } as React.CSSProperties
           }
         >
+          <p className="scroll-line is-prev-far">{activeLyric.prev2Text ?? '\u00A0'}</p>
           <p className="scroll-line is-prev">{activeLyric.prevText ?? '\u00A0'}</p>
           <p
             ref={lyricWordsRef}
@@ -1032,6 +1076,7 @@ export function App() {
             })}
           </p>
           <p className="scroll-line is-next">{activeLyric.nextText ?? '\u00A0'}</p>
+          <p className="scroll-line is-next-far">{activeLyric.next2Text ?? '\u00A0'}</p>
         </div>
       )}
 
