@@ -89,7 +89,7 @@ body,
   left: 50%;
   top: 46%;
   transform: translate(-50%, -50%) scale(calc(1 + var(--beat, 0) * 0.04));
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', 'Playfair Display', Georgia, serif;
   font-style: italic;
   font-size: clamp(8rem, 24vw, 22rem);
   line-height: 0.9;
@@ -278,7 +278,7 @@ body,
 
 /* Hero word inside each line: giant Editorial Serif Italic colored from album cover */
 .reels-word-mask.is-hero .reels-word-inner {
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', 'Playfair Display', Georgia, serif;
   font-style: italic;
   font-weight: 400;
   font-size: clamp(2.6rem, 6.2vw, 5.8rem);
@@ -490,7 +490,7 @@ body,
 
 .stage-card-title {
   margin: 0;
-  font-family: 'Silkscreen', 'JetBrains Mono', monospace;
+  font-family: 'Pixelify Sans', 'JetBrains Mono', monospace;
   font-size: clamp(1.8rem, 4.4vw, 3.8rem);
   line-height: 1.12;
   text-transform: uppercase;
@@ -568,7 +568,7 @@ body,
 
 .lyrics-overlay p {
   margin: 0;
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', 'Playfair Display', Georgia, serif;
   font-size: clamp(2rem, 4vw, 3.5rem);
   font-weight: 400;
   letter-spacing: -0.015em;
@@ -582,7 +582,7 @@ body,
 }
 
 .lyrics-overlay.is-pixel-font p {
-  font-family: 'Silkscreen', 'JetBrains Mono', monospace;
+  font-family: 'Pixelify Sans', 'JetBrains Mono', monospace;
   font-size: clamp(1.35rem, 2.7vw, 2.35rem);
   letter-spacing: -0.02em;
   line-height: 1.3;
@@ -975,13 +975,13 @@ body,
 
 .scroll-line {
   margin: 0;
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', 'Playfair Display', Georgia, serif;
   line-height: 1.22;
   transition: opacity 0.35s ease, transform 0.35s ease;
 }
 
 .lyrics-scroll-stack.is-pixel-font .scroll-line {
-  font-family: 'Silkscreen', 'JetBrains Mono', monospace;
+  font-family: 'Pixelify Sans', 'JetBrains Mono', monospace;
   text-transform: uppercase;
   line-height: 1.32;
 }
