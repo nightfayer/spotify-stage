@@ -329,13 +329,14 @@ export function App() {
       const next: LyricMode = prev === 'kinetic' ? 'scroll' : prev === 'scroll' ? 'off' : 'kinetic';
       const labels: Record<LyricMode, string> = {
         kinetic: 'Субтитры: Кинетические',
-        scroll: 'Субтитры: Скролл (3 строки)',
+        scroll: 'Субтитры: Скролл (5 строк)',
         off: 'Субтитры: Выкл',
       };
-      showNotice(labels[next], 1600);
+      const suffix = next !== 'off' && lyrics.length === 0 ? ' · нет текста для этого трека' : '';
+      showNotice(`${labels[next]}${suffix}`, 2000);
       return next;
     });
-  }, [showNotice]);
+  }, [lyrics.length, showNotice]);
 
   const cycleFontStyle = useCallback(() => {
     setFontStyle((prev) => {
@@ -944,8 +945,8 @@ export function App() {
         </div>
       )}
 
-      {/* Dedicated Editorial Reels Typography Stage (when 'Type' scene is active) */}
-      {resolvedBiome === 'kinetic-type' && !titleCardTrack && (
+      {/* Dedicated Editorial Reels Typography Stage (when 'Type' scene is active & kinetic mode is on) */}
+      {resolvedBiome === 'kinetic-type' && !titleCardTrack && lyricMode === 'kinetic' && (
         <KineticTypeStage
           track={effectiveTrack}
           activeLyric={activeLyric}
@@ -958,8 +959,8 @@ export function App() {
         />
       )}
 
-      {/* Instrumental Interlude Beat Dots over WebGL scenes */}
-      {resolvedBiome !== 'kinetic-type' &&
+      {/* Instrumental Interlude Beat Dots over WebGL scenes (and Type scene in scroll mode) */}
+      {!(resolvedBiome === 'kinetic-type' && lyricMode === 'kinetic') &&
         isInterlude &&
         !titleCardTrack &&
         lyricMode !== 'off' && (
@@ -1027,8 +1028,7 @@ export function App() {
         </div>
       )}
 
-      {resolvedBiome !== 'kinetic-type' &&
-        activeLyric &&
+      {activeLyric &&
         !isInterlude &&
         !titleCardTrack &&
         lyricMode === 'scroll' && (
