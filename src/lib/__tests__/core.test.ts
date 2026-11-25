@@ -108,7 +108,7 @@ describe('kinetic 2D camera layout (zero overlap guarantee)', () => {
       ['невероятно', 'громкий', 'припев', 'разрывает', 'тишину', 'вокруг', 'нас'],
     ];
 
-    for (let lineIdx = 0; lineIdx < 8; lineIdx++) {
+    for (let lineIdx = 0; lineIdx < 12; lineIdx++) {
       const words = sampleLines[lineIdx % sampleLines.length];
       const placed = layoutLineInWorld(words, lineIdx, 'test-track');
       expect(placed).toHaveLength(words.length);

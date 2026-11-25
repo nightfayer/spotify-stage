@@ -590,7 +590,7 @@ export function App() {
       }
     };
 
-    rafId = requestAnimationFrame(tick);
+    tick();
     return () => cancelAnimationFrame(rafId);
   }, [isAuthenticated, lyricMode, lyricOffsetMs, lyrics, track.durationMs, track.id]);
 
@@ -871,9 +871,12 @@ export function App() {
       audioSource: AudioSourceType;
     }) => {
       const intensity = Math.min(1, metrics.beat * 0.75 + metrics.bass * 0.45);
+      const isKick = metrics.audioSource !== 'none' && metrics.beat > 0.78 ? 1 : 0;
       const el = lyricsOverlayRef.current;
       if (el) {
         el.style.setProperty('--beat', intensity.toFixed(3));
+        el.style.setProperty('--energy', metrics.energy.toFixed(3));
+        el.style.setProperty('--kick', String(isKick));
       }
       const hud = hudLayerRef.current;
       if (hud) {
@@ -1011,19 +1014,36 @@ export function App() {
               visible={bouncingBall}
               lyricOffsetMs={lyricOffsetMs}
             />
-            {activeLyric.words.map((word, wIdx) => {
-              const cls =
-                wIdx === activeLyric.activeWordIndex
-                  ? 'lyric-word is-active-word'
-                  : wIdx < activeLyric.activeWordIndex
-                    ? 'lyric-word is-revealed'
-                    : 'lyric-word is-pending';
-              return (
-                <span key={`${wIdx}-${word}`} className={cls}>
-                  {word}{' '}
-                </span>
-              );
-            })}
+            {(() => {
+              let heroIdx = 0;
+              let bestLen = 0;
+              for (let i = 0; i < activeLyric.words.length; i++) {
+                const len = activeLyric.words[i].replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '').length;
+                if (len >= bestLen) {
+                  bestLen = len;
+                  heroIdx = i;
+                }
+              }
+              return activeLyric.words.map((word, wIdx) => {
+                const isHero = activeLyric.words.length > 2 && wIdx === heroIdx;
+                const heroCls = isHero
+                  ? activeLyric.index % 2 === 0
+                    ? ' is-kinetic-hero'
+                    : ' is-kinetic-hero is-kinetic-outline'
+                  : '';
+                const cls =
+                  (wIdx === activeLyric.activeWordIndex
+                    ? 'lyric-word is-active-word'
+                    : wIdx < activeLyric.activeWordIndex
+                      ? 'lyric-word is-revealed'
+                      : 'lyric-word is-pending') + heroCls;
+                return (
+                  <span key={`${wIdx}-${word}`} className={cls}>
+                    {word}{' '}
+                  </span>
+                );
+              });
+            })()}
           </p>
         </div>
       )}
@@ -1061,19 +1081,36 @@ export function App() {
               visible={bouncingBall}
               lyricOffsetMs={lyricOffsetMs}
             />
-            {activeLyric.words.map((word, wIdx) => {
-              const cls =
-                wIdx === activeLyric.activeWordIndex
-                  ? 'lyric-word is-active-word'
-                  : wIdx < activeLyric.activeWordIndex
-                    ? 'lyric-word is-revealed'
-                    : 'lyric-word is-pending';
-              return (
-                <span key={`${wIdx}-${word}`} className={cls}>
-                  {word}{' '}
-                </span>
-              );
-            })}
+            {(() => {
+              let heroIdx = 0;
+              let bestLen = 0;
+              for (let i = 0; i < activeLyric.words.length; i++) {
+                const len = activeLyric.words[i].replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '').length;
+                if (len >= bestLen) {
+                  bestLen = len;
+                  heroIdx = i;
+                }
+              }
+              return activeLyric.words.map((word, wIdx) => {
+                const isHero = activeLyric.words.length > 2 && wIdx === heroIdx;
+                const heroCls = isHero
+                  ? activeLyric.index % 2 === 0
+                    ? ' is-kinetic-hero'
+                    : ' is-kinetic-hero is-kinetic-outline'
+                  : '';
+                const cls =
+                  (wIdx === activeLyric.activeWordIndex
+                    ? 'lyric-word is-active-word'
+                    : wIdx < activeLyric.activeWordIndex
+                      ? 'lyric-word is-revealed'
+                      : 'lyric-word is-pending') + heroCls;
+                return (
+                  <span key={`${wIdx}-${word}`} className={cls}>
+                    {word}{' '}
+                  </span>
+                );
+              });
+            })()}
           </p>
           <p className="scroll-line is-next">{activeLyric.nextText ?? '\u00A0'}</p>
           <p className="scroll-line is-next-far">{activeLyric.next2Text ?? '\u00A0'}</p>

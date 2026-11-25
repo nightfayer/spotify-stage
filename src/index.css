@@ -1059,8 +1059,8 @@ body,
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
-  max-width: 440px;
-  min-width: 340px;
+  max-width: 472px;
+  min-width: 356px;
   flex-shrink: 0;
 }
 
@@ -1092,12 +1092,25 @@ body,
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: rgba(255, 255, 255, 0.56);
 }
 
-.biome-tag::before,
-.timecode-tag::before {
+.mode-pill,
+.biome-tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.timecode-tag {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.biome-tag::before {
   content: '· ';
 }
 
@@ -1888,10 +1901,10 @@ body,
   height: 0;
   will-change: transform;
   transform:
-    scale(calc(var(--cam-zoom, 1) + var(--beat, 0) * 0.045))
+    scale(calc(var(--cam-zoom, 1) + var(--beat, 0) * 0.045 + var(--energy, 0) * 0.03 + var(--kick, 0) * 0.04))
     rotate(calc(var(--cam-rot, 0) * -1deg))
     translate3d(calc(var(--cam-x, 0) * -1px), calc(var(--cam-y, 0) * -1px), 0);
-  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform calc(0.36s - var(--energy, 0) * 0.1s) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ae-world-word {
@@ -2156,4 +2169,34 @@ body,
   to {
     transform: scaleX(1);
   }
+}
+
+/* Upgraded Kinetic Overlay over WebGL 8-bit scenes (3D parallax + Hero contrast + Beat Kick) */
+.lyrics-overlay {
+  perspective: 900px;
+}
+
+.lyrics-overlay .lyric-line-rel {
+  transform:
+    rotateX(calc(var(--energy, 0) * 3.5deg))
+    scale(calc(1 + var(--beat, 0) * 0.035 + var(--kick, 0) * 0.03));
+  transition: transform 0.12s ease-out;
+  will-change: transform;
+}
+
+.lyrics-overlay .lyric-word.is-kinetic-hero {
+  font-size: 1.24em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.lyrics-overlay .lyric-word.is-kinetic-hero.is-kinetic-outline {
+  color: rgba(9, 13, 22, 0.92);
+  -webkit-text-stroke: 3.5px var(--lyric-accent, #fde047);
+  paint-order: stroke fill;
+  text-shadow: none;
+}
+
+.lyrics-overlay .lyric-word.is-active-word {
+  filter: drop-shadow(0 0 calc(6px + var(--kick, 0) * 16px) var(--lyric-accent, rgba(253, 224, 71, 0.6)));
 }

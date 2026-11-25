@@ -121,7 +121,14 @@ export function layoutLineInWorld(
   trackId: string
 ): PlacedWord[] {
   const heroIdx = pickHeroWordIndex(words);
-  const pattern = lineIdx % 4;
+  // 6 distinct choreography patterns:
+  // 0: right-down + 90° turn
+  // 1: stair-up + -90° turn
+  // 2: Z-zigzag + 90° -> 0° double turn on long lines
+  // 3: right-up + -90° -> 0° double turn on long lines
+  // 4: horizontal cadence + sharp 90° drop
+  // 5: ascending diagonal + -90° pivot
+  const pattern = lineIdx % 6;
   const placed: PlacedWord[] = [];
   let curRot = 0;
 
@@ -156,44 +163,78 @@ export function layoutLineInWorld(
       const prev = placed[i - 1];
       const prevBox = prev.box;
 
-      // Decide whether this word triggers a crisp ±90° camera turn
-      const turnPoint = Math.max(1, Math.min(words.length - 1, heroIdx === 0 ? 2 : heroIdx));
-      if (i === turnPoint && curRot === 0 && words.length >= 3) {
+      // Single or double ±90° camera turns (0° -> ±90° -> 0° on 6+ word lines)
+      const firstTurn = Math.max(1, Math.min(words.length - 1, heroIdx === 0 ? 2 : Math.min(heroIdx, 3)));
+      const secondTurn = words.length >= 6 && (pattern === 2 || pattern === 3) ? Math.min(words.length - 1, firstTurn + 2) : -1;
+
+      if (i === firstTurn && curRot === 0 && words.length >= 3) {
         curRot = pattern % 2 === 0 ? 90 : -90;
+      } else if (i === secondTurn && curRot !== 0) {
+        curRot = 0;
       }
 
       const isVertical = Math.abs(curRot) === 90;
       const myWorldW = isVertical ? h : w;
       const myWorldH = isVertical ? w : h;
 
-      // Pick primary placement direction & nudge vector so words flow like a continuous AE reel
       let dirX = 0;
       let dirY = 1;
 
       if (curRot === 0) {
-        if (i % 2 === 1) {
-          // Place cleanly to the right of previous word (aligned near baseline)
-          cx = prevBox.right + GAP + myWorldW / 2;
-          cy = prev.y + (pattern % 2 === 0 ? 10 : -8);
-          dirX = 1;
-          dirY = 0;
-        } else {
-          // Drop cleanly underneath previous word
-          cx = prev.x + (pattern % 2 === 0 ? 24 : -24);
+        if (prev.rot !== 0) {
+          // Returning from ±90° back to 0°: step cleanly below the rotated cluster
+          cx = prev.x;
           cy = prevBox.bottom + GAP + myWorldH / 2;
           dirX = 0;
           dirY = 1;
+        } else if (pattern === 1 || pattern === 5) {
+          // Ascending stair-up trajectory
+          if (i % 2 === 1) {
+            cx = prevBox.right + GAP + myWorldW / 2;
+            cy = prev.y - 24;
+            dirX = 1;
+            dirY = 0;
+          } else {
+            cx = prev.x + 28;
+            cy = prevBox.top - GAP - myWorldH / 2;
+            dirX = 0;
+            dirY = -1;
+          }
+        } else if (pattern === 2) {
+          // Z-zigzag: alternate right and left-below
+          if (i % 2 === 1) {
+            cx = prevBox.right + GAP + myWorldW / 2;
+            cy = prev.y + 8;
+            dirX = 1;
+            dirY = 0;
+          } else {
+            cx = prevBox.left - 24;
+            cy = prevBox.bottom + GAP + myWorldH / 2;
+            dirX = 0;
+            dirY = 1;
+          }
+        } else {
+          // Classic editorial right-step and drop-down stair
+          if (i % 2 === 1) {
+            cx = prevBox.right + GAP + myWorldW / 2;
+            cy = prev.y + (pattern % 2 === 0 ? 10 : -10);
+            dirX = 1;
+            dirY = 0;
+          } else {
+            cx = prev.x + (pattern % 2 === 0 ? 24 : -24);
+            cy = prevBox.bottom + GAP + myWorldH / 2;
+            dirX = 0;
+            dirY = 1;
+          }
         }
       } else if (curRot === 90) {
-        // Camera is rotated -90° so screen-down is -X in world space, screen-right is +Y
+        // Camera is rotated -90° so screen-down is -X in world space
         if (prev.rot === 0) {
-          // First word after 90° turn: sit cleanly to the right of the horizontal line
           cx = prevBox.right + GAP + myWorldW / 2;
           cy = prevBox.top + myWorldH / 2;
           dirX = 1;
           dirY = 0;
         } else {
-          // Subsequent words drop "down" in the rotated camera's view (-X in world space)
           cx = prevBox.left - GAP - myWorldW / 2;
           cy = prev.y;
           dirX = -1;
@@ -217,7 +258,7 @@ export function layoutLineInWorld(
       // Guarantee 0 overlaps against ALL previously placed words
       box = makeBox(cx, cy, w, h, curRot);
       let guard = 0;
-      while (placed.some((p) => boxesOverlap(box, p.box)) && guard < 40) {
+      while (placed.some((p) => boxesOverlap(box, p.box)) && guard < 48) {
         guard += 1;
         cx += dirX * 28;
         cy += dirY * 28;
