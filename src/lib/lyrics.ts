@@ -170,11 +170,59 @@ export function buildPlainLyrics(plainText: string, durationMs: number): LyricLi
   }));
 }
 
+async function fetchWithTimeout(
+  url: string,
+  signal?: AbortSignal,
+  timeoutMs = 5000
+): Promise<Response> {
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+  }
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    globalThis.clearTimeout(timer);
+    signal?.removeEventListener('abort', onParentAbort);
+  }
+}
+
+async function queryLrcGet(
+  params: URLSearchParams,
+  signal?: AbortSignal
+): Promise<LrcLibItem | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://lrclib.net/api/get?${params.toString()}`,
+      signal,
+      5000
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as LrcLibItem;
+  } catch {
+    return null;
+  }
+}
+
 async function queryLrcSearch(params: URLSearchParams, signal?: AbortSignal): Promise<LrcLibItem[]> {
-  const res = await fetch(`https://lrclib.net/api/search?${params.toString()}`, { signal });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? (data as LrcLibItem[]) : [];
+  try {
+    const res = await fetchWithTimeout(
+      `https://lrclib.net/api/search?${params.toString()}`,
+      signal,
+      5000
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? (data as LrcLibItem[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchSyncedLyrics(
@@ -193,39 +241,50 @@ export async function fetchSyncedLyrics(
   try {
     let fallbackPlain: string | null = null;
 
-    // 1. Exact lookup via /api/get
-    const getParams = new URLSearchParams({
-      artist_name: cleanArtist,
-      track_name: title,
-      duration: String(durationSec),
-    });
+    // 1. Fast exact lookup via /api/get (with duration, then without duration / cleaned title)
+    const getAttempts: URLSearchParams[] = [
+      new URLSearchParams({
+        artist_name: cleanArtist,
+        track_name: title,
+        duration: String(durationSec),
+      }),
+      new URLSearchParams({
+        artist_name: cleanArtist,
+        track_name: cleanedTitle,
+      }),
+    ];
 
-    const res = await fetch(`https://lrclib.net/api/get?${getParams.toString()}`, { signal });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.syncedLyrics) {
+    for (const getParams of getAttempts) {
+      if (signal?.aborted) return [];
+      const data = await queryLrcGet(getParams, signal);
+      if (!data) continue;
+      if (typeof data.syncedLyrics === 'string' && data.syncedLyrics.trim()) {
         const parsed = parseLrc(data.syncedLyrics);
-        lyricsCache.set(cacheKey, parsed);
-        return parsed;
+        if (parsed.length > 0) {
+          lyricsCache.set(cacheKey, parsed);
+          return parsed;
+        }
       }
-      if (typeof data?.plainLyrics === 'string' && data.plainLyrics.trim()) {
+      if (!fallbackPlain && typeof data.plainLyrics === 'string' && data.plainLyrics.trim()) {
         fallbackPlain = data.plainLyrics;
       }
     }
 
     // 2. Structured search with cleaned title & primary artist
-    const structuredResults = await queryLrcSearch(
-      new URLSearchParams({ artist_name: cleanArtist, track_name: cleanedTitle }),
-      signal
-    );
-    if (structuredResults.length > 0) {
-      const picked = pickBestResult(structuredResults, artist, cleanedTitle, durationSec);
-      if (picked.syncedLyrics) {
-        const parsed = parseLrc(picked.syncedLyrics);
-        lyricsCache.set(cacheKey, parsed);
-        return parsed;
+    if (!signal?.aborted) {
+      const structuredResults = await queryLrcSearch(
+        new URLSearchParams({ artist_name: cleanArtist, track_name: cleanedTitle }),
+        signal
+      );
+      if (structuredResults.length > 0) {
+        const picked = pickBestResult(structuredResults, artist, cleanedTitle, durationSec);
+        if (picked.syncedLyrics) {
+          const parsed = parseLrc(picked.syncedLyrics);
+          lyricsCache.set(cacheKey, parsed);
+          return parsed;
+        }
+        if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
       }
-      if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
     }
 
     // 3. Combined full-text search (artist + title) — crucial for common titles & collabs/features
@@ -240,6 +299,7 @@ export async function fetchSyncedLyrics(
     searchQueries.push(cleanedTitle);
 
     for (const q of searchQueries) {
+      if (signal?.aborted) return [];
       const results = await queryLrcSearch(new URLSearchParams({ q }), signal);
       if (results.length === 0) continue;
       const picked = pickBestResult(results, artist, cleanedTitle, durationSec);
@@ -257,7 +317,6 @@ export async function fetchSyncedLyrics(
       return synthetic;
     }
 
-    lyricsCache.set(cacheKey, []);
     return [];
   } catch {
     return [];
