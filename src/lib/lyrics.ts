@@ -276,61 +276,55 @@ export async function fetchSyncedLyrics(
       }
     }
 
-    // 2. Structured search with cleaned title & primary artist
+    // 2. Run LRCLIB searches & lyrics.ovh fallback IN PARALLEL (max ~3.5s total instead of 14s sequential)
     if (!signal?.aborted) {
-      const structuredResults = await queryLrcSearch(
-        new URLSearchParams({ artist_name: cleanArtist, track_name: cleanedTitle }),
-        signal
-      );
-      if (structuredResults.length > 0) {
-        const picked = pickBestResult(structuredResults, artist, cleanedTitle, durationSec);
+      const allArtists = artist
+        .split(/,|&|\bx\b/i)
+        .map((a) => a.trim())
+        .filter(Boolean);
+
+      const searchPromises: Promise<LrcLibItem[]>[] = [
+        queryLrcSearch(
+          new URLSearchParams({ artist_name: cleanArtist, track_name: cleanedTitle }),
+          signal
+        ),
+        queryLrcSearch(new URLSearchParams({ q: `${cleanArtist} ${cleanedTitle}` }), signal),
+      ];
+      if (allArtists.length > 1) {
+        searchPromises.push(
+          queryLrcSearch(new URLSearchParams({ q: `${allArtists[1]} ${cleanedTitle}` }), signal)
+        );
+      }
+
+      const [searchBatches, ovhPlain] = await Promise.all([
+        Promise.all(searchPromises),
+        fallbackPlain ? Promise.resolve(null) : queryLyricsOvh(cleanArtist, cleanedTitle, signal),
+      ]);
+
+      const combinedResults = searchBatches.flat();
+      if (combinedResults.length > 0) {
+        const picked = pickBestResult(combinedResults, artist, cleanedTitle, durationSec);
         if (picked.syncedLyrics) {
           const parsed = parseLrc(picked.syncedLyrics);
-          lyricsCache.set(cacheKey, parsed);
-          return parsed;
+          if (parsed.length > 0) {
+            lyricsCache.set(cacheKey, parsed);
+            return parsed;
+          }
         }
-        if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
+        if (!fallbackPlain && picked.plainLyrics) {
+          fallbackPlain = picked.plainLyrics;
+        }
       }
-    }
 
-    // 3. Combined full-text search (artist + title) — crucial for common titles & collabs/features
-    const allArtists = artist
-      .split(/,|&|\bx\b/i)
-      .map((a) => a.trim())
-      .filter(Boolean);
-    const searchQueries = [`${cleanArtist} ${cleanedTitle}`];
-    if (allArtists.length > 1) {
-      searchQueries.push(`${allArtists[1]} ${cleanedTitle}`);
-    }
-    searchQueries.push(cleanedTitle);
-
-    for (const q of searchQueries) {
-      if (signal?.aborted) return [];
-      const results = await queryLrcSearch(new URLSearchParams({ q }), signal);
-      if (results.length === 0) continue;
-      const picked = pickBestResult(results, artist, cleanedTitle, durationSec);
-      if (picked.syncedLyrics) {
-        const parsed = parseLrc(picked.syncedLyrics);
-        lyricsCache.set(cacheKey, parsed);
-        return parsed;
+      if (!fallbackPlain && ovhPlain) {
+        fallbackPlain = ovhPlain;
       }
-      if (!fallbackPlain && picked.plainLyrics) fallbackPlain = picked.plainLyrics;
     }
 
     if (fallbackPlain) {
       const synthetic = buildPlainLyrics(fallbackPlain, durationMs);
       lyricsCache.set(cacheKey, synthetic);
       return synthetic;
-    }
-
-    // 4. Secondary provider fallback (lyrics.ovh) when LRCLIB has no match or /api/search stalls
-    if (!signal?.aborted) {
-      const ovhPlain = await queryLyricsOvh(cleanArtist, cleanedTitle, signal);
-      if (ovhPlain) {
-        const synthetic = buildPlainLyrics(ovhPlain, durationMs);
-        lyricsCache.set(cacheKey, synthetic);
-        return synthetic;
-      }
     }
 
     return [];
