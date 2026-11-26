@@ -2002,14 +2002,36 @@ body,
   paint-order: stroke fill;
 }
 
-/* Signature 00:00 Reference Video Intro / Interlude Pulsing Circle */
+/* Signature 00:00 Reference Video Intro / Interlude Pulsing Circle + Live FFT Ribbon */
 .ae-intro-circle-wrap {
   position: fixed;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 34px;
   pointer-events: none;
+}
+
+.ae-interlude-eq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 44px;
+}
+
+.ae-interlude-bar {
+  display: block;
+  width: 4px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--reel-primary);
+  opacity: 0.78;
+  transform: scaleY(0.18);
+  transform-origin: center center;
+  will-change: transform;
 }
 
 .ae-intro-circle {

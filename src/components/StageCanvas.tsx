@@ -92,6 +92,7 @@ const PIXEL_HORIZON_FRAGMENT = `
   uniform float uTreble;
   uniform float uBeat;
   uniform float uProgress;
+  uniform sampler2D uSpectrum;
 
   ${GLSL_8BIT}
 
@@ -141,6 +142,19 @@ const PIXEL_HORIZON_FRAGMENT = `
         }
       }
 
+      // Live mirrored 8-bit FFT skyline riding along the horizon line
+      float specFreq = abs(uv.x - 0.5) * 2.0;
+      float specVal = texture2D(uSpectrum, vec2(clamp(specFreq, 0.0, 1.0), 0.5)).r;
+      float skylineH = specVal * 0.14;
+      if (uv.y < horizon + skylineH) {
+        float barFill = (uv.y - horizon) / max(0.001, skylineH);
+        vec3 eqCol = mix(uBg * 0.22, mix(uPrimary, uAccent, barFill * 0.85), ditherStep(barFill, px, 4.0));
+        col = mix(col, eqCol, 0.82);
+        if (abs((uv.y - horizon) - skylineH) < 0.008 && specVal > 0.08) {
+          col = mix(col, uAccent, 0.9);
+        }
+      }
+
       // Distant drifting pixel islands on the horizon line
       float islandX = px.x + uTime * 2.5;
       float islandH = hash11(floor(islandX / 24.0) * 17.3);
@@ -182,6 +196,7 @@ const PIXEL_PLASMA_FRAGMENT = `
   uniform float uMid;
   uniform float uBeat;
   uniform float uProgress;
+  uniform sampler2D uSpectrum;
 
   ${GLSL_8BIT}
 
@@ -233,6 +248,7 @@ const PIXEL_TUNNEL_FRAGMENT = `
   uniform float uMid;
   uniform float uBeat;
   uniform float uProgress;
+  uniform sampler2D uSpectrum;
 
   ${GLSL_8BIT}
 
@@ -292,6 +308,7 @@ const PIXEL_KALEIDO_FRAGMENT = `
   uniform float uMid;
   uniform float uBeat;
   uniform float uProgress;
+  uniform sampler2D uSpectrum;
 
   ${GLSL_8BIT}
 
@@ -338,6 +355,7 @@ const PIXEL_ECHO_FRAGMENT = `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D uFeedbackTex;
+  uniform sampler2D uSpectrum;
   uniform float uTime;
   uniform vec2 uResolution;
   uniform vec3 uPrimary;
@@ -367,13 +385,15 @@ const PIXEL_ECHO_FRAGMENT = `
     vec3 prev = texture2D(uFeedbackTex, clamp(fbUv, 0.0, 1.0)).rgb;
     vec3 col = mix(uBg * 0.22, prev, 0.91);
 
-    // Crisp 8-bit orbital emitter & pulsing diamond ring
+    // Crisp 8-bit radial FFT orbital emitter & pulsing spectrum ring
     vec2 p = (uv - 0.5) * aspect;
     float r = length(p);
-    float ringRadius = 0.16 + 0.08 * sin(uTime * 1.1) + uBass * 0.09;
+    float angNorm = abs(atan(p.y, p.x)) / 3.14159265;
+    float radialSpec = texture2D(uSpectrum, vec2(angNorm, 0.5)).r;
+    float ringRadius = 0.14 + 0.06 * sin(uTime * 1.1) + uBass * 0.06 + radialSpec * 0.11;
     float ringDist = abs(r - ringRadius);
     if (ringDist < 0.016) {
-      col = mix(uPrimary, uAccent, uBeat * 0.5);
+      col = mix(uPrimary, uAccent, clamp(radialSpec * 0.85 + uBeat * 0.35, 0.0, 1.0));
     }
 
     // Two orbiting pixel sparks leaving trails
@@ -391,6 +411,108 @@ const PIXEL_ECHO_FRAGMENT = `
     if (luma < 0.08 && bayer4x4(px) > luma * 12.0) {
       col = uBg * 0.22;
     }
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// 8-BIT WORLD 6: Retro CRT Oscilloscope & 64-Band Synthwave Spectrum Grid (Scope)
+const PIXEL_SCOPE_FRAGMENT = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform float uTime;
+  uniform vec2 uResolution;
+  uniform vec3 uPrimary;
+  uniform vec3 uSecondary;
+  uniform vec3 uAccent;
+  uniform vec3 uBg;
+  uniform float uBass;
+  uniform float uMid;
+  uniform float uTreble;
+  uniform float uBeat;
+  uniform sampler2D uSpectrum;
+
+  ${GLSL_8BIT}
+
+  void main() {
+    vec2 px;
+    vec2 uv = pixelateCoord(vUv, uResolution, 5.0, px);
+    float horizon = 0.38;
+
+    // Deep CRT phosphor backdrop with subtle vertical gradient
+    vec3 col = mix(uBg * 0.24, uBg * 0.52, clamp(1.0 - abs(uv.y - horizon) * 1.6, 0.0, 1.0));
+
+    // Perspective synthwave grid below horizon
+    if (uv.y < horizon) {
+      float depth = max(0.018, horizon - uv.y);
+      float z = 0.22 / depth;
+      float gx = (uv.x - 0.5) * z * 4.5;
+      float gz = z * 3.0 - uTime * (1.8 + uBass * 0.9);
+      float lineX = step(0.92, fract(gx)) + step(fract(gx), 0.08);
+      float lineZ = step(0.9, fract(gz));
+      float gridMask = clamp(lineX + lineZ, 0.0, 1.0) * smoothstep(0.0, 0.24, depth);
+      col = mix(col, mix(uSecondary, uPrimary, 0.55), gridMask * 0.42);
+    }
+
+    // 32-band mirrored 8-bit FFT spectrum bars rising from horizon
+    float numCols = 32.0;
+    float colIdx = floor(uv.x * numCols);
+    float colFrac = fract(uv.x * numCols);
+    float mirrorFreq = abs((colIdx + 0.5) / numCols - 0.5) * 2.0;
+    float specAmp = texture2D(uSpectrum, vec2(clamp(mirrorFreq, 0.0, 1.0), 0.5)).r;
+    float barHeight = specAmp * 0.44;
+
+    if (colFrac > 0.14 && colFrac < 0.86 && uv.y >= horizon && uv.y <= horizon + barHeight) {
+      float relH = (uv.y - horizon) / max(0.001, barHeight);
+      // Segmented LED step look
+      float seg = step(0.18, fract((uv.y - horizon) * 42.0));
+      vec3 barCol = mix(uPrimary, mix(uSecondary, uAccent, relH), relH);
+      col = mix(col, barCol, seg * 0.92);
+    }
+    // Bright peak cap floating on top of each bar
+    if (colFrac > 0.14 && colFrac < 0.86 && specAmp > 0.05) {
+      float capDist = abs(uv.y - (horizon + barHeight + 0.012));
+      if (capDist < 0.008) {
+        col = mix(uAccent, vec3(1.0), 0.35 + uBeat * 0.35);
+      }
+    }
+
+    // Subtle mirrored reflection of spectrum bars on the CRT grid floor
+    if (colFrac > 0.14 && colFrac < 0.86 && uv.y < horizon && uv.y >= horizon - barHeight * 0.42) {
+      float refFade = 1.0 - (horizon - uv.y) / max(0.001, barHeight * 0.42);
+      float dither = ditherStep(refFade * 0.55, px, 3.0);
+      col = mix(col, uPrimary, dither * 0.36);
+    }
+
+    // Dual-trace glowing oscilloscope waveform riding across upper-center
+    float s1 = texture2D(uSpectrum, vec2(uv.x, 0.5)).r;
+    float s2 = texture2D(uSpectrum, vec2(1.0 - uv.x, 0.5)).r;
+    float waveY1 =
+      0.66 +
+      sin(uv.x * 18.0 + uTime * 4.2) * (0.04 + s1 * 0.11) +
+      cos(uv.x * 34.0 - uTime * 6.5) * (0.015 + uTreble * 0.04);
+    float waveY2 =
+      0.66 +
+      cos(uv.x * 14.0 - uTime * 3.4) * (0.03 + s2 * 0.09);
+
+    float dWave1 = abs(uv.y - waveY1);
+    float dWave2 = abs(uv.y - waveY2);
+    if (dWave2 < 0.012) {
+      col = mix(col, uSecondary, 0.7);
+    }
+    if (dWave1 < 0.014) {
+      col = mix(uAccent, vec3(1.0), smoothstep(0.014, 0.0, dWave1) * 0.75);
+    } else if (dWave1 < 0.045) {
+      float glow = (1.0 - dWave1 / 0.045);
+      col += uPrimary * glow * 0.28;
+    }
+
+    // Crisp horizon scanline & subtle CRT horizontal lines
+    if (abs(uv.y - horizon) < 0.005) {
+      col = mix(col, uAccent, 0.65);
+    }
+    float scanline = mod(px.y, 2.0) < 1.0 ? 0.92 : 1.0;
+    col *= scanline;
 
     gl_FragColor = vec4(col, 1.0);
   }
@@ -521,6 +643,7 @@ const UNIFORM_NAMES = [
   'uTreble',
   'uBeat',
   'uProgress',
+  'uSpectrum',
   'uFeedbackTex',
   'uTex',
   'uPrevTex',
@@ -735,12 +858,33 @@ export const StageCanvas = memo(
         'pixel-plasma': createProgram(gl, vertShader, PIXEL_PLASMA_FRAGMENT),
         'pixel-tunnel': createProgram(gl, vertShader, PIXEL_TUNNEL_FRAGMENT),
         'pixel-kaleido': createProgram(gl, vertShader, PIXEL_KALEIDO_FRAGMENT),
+        'pixel-scope': createProgram(gl, vertShader, PIXEL_SCOPE_FRAGMENT),
         'kinetic-type': createProgram(gl, vertShader, KINETIC_TYPE_FRAGMENT),
       };
       const echoProg = createProgram(gl, vertShader, PIXEL_ECHO_FRAGMENT);
       const blitProg = createProgram(gl, vertShader, BLIT_FRAGMENT);
       const compProg = createProgram(gl, vertShader, TRANSITION_COMPOSITE_FRAGMENT);
       gl.deleteShader(vertShader);
+
+      // 64x1 1D FFT spectrum texture (LUMINANCE works identically in WebGL1 & WebGL2)
+      const spectrumTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.LUMINANCE,
+        64,
+        1,
+        0,
+        gl.LUMINANCE,
+        gl.UNSIGNED_BYTE,
+        new Uint8Array(64)
+      );
+      gl.bindTexture(gl.TEXTURE_2D, null);
 
       // Native 8-bit render resolution (1/5 linear = 25x fewer fragment shader invocations)
       const PIXEL_SCALE = 5;
@@ -852,6 +996,11 @@ export const StageCanvas = memo(
         if (u.uTreble) gl.uniform1f(u.uTreble, metrics.treble);
         if (u.uBeat) gl.uniform1f(u.uBeat, metrics.beat);
         if (u.uProgress) gl.uniform1f(u.uProgress, smoothProgress);
+        if (u.uSpectrum) {
+          gl.activeTexture(gl.TEXTURE2);
+          gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
+          gl.uniform1i(u.uSpectrum, 2);
+        }
       };
 
       const renderFrame = (forceDraw = false) => {
@@ -931,6 +1080,23 @@ export const StageCanvas = memo(
         // Skip GPU fragment shader work completely when opaque Type stage covers the canvas
         if (!forceDraw && occludedRef.current && !needsComposite) {
           return;
+        }
+
+        // Upload 64-byte FFT spectrum into 1D GPU texture (TEXTURE2)
+        if (spectrumTex && metrics.spectrum.length >= 64) {
+          gl.activeTexture(gl.TEXTURE2);
+          gl.bindTexture(gl.TEXTURE_2D, spectrumTex);
+          gl.texSubImage2D(
+            gl.TEXTURE_2D,
+            0,
+            0,
+            0,
+            64,
+            1,
+            gl.LUMINANCE,
+            gl.UNSIGNED_BYTE,
+            metrics.spectrum
+          );
         }
 
         const stepEcho = () => {
@@ -1048,6 +1214,7 @@ export const StageCanvas = memo(
         disposeTarget(rtLow);
         disposeTarget(rtEchoRead);
         disposeTarget(rtEchoWrite);
+        if (spectrumTex) gl.deleteTexture(spectrumTex);
         gl.deleteBuffer(triBuf);
         Object.values(programs).forEach((p) => gl.deleteProgram(p.program));
         gl.deleteProgram(echoProg.program);

@@ -11,6 +11,7 @@ interface KineticTypeStageProps {
   isInterlude: boolean;
   beatRef: React.RefObject<HTMLDivElement | null>;
   clockRef: React.RefObject<PlaybackClock>;
+  spectrumRef: React.RefObject<Uint8Array | null>;
   showBall: boolean;
   fontStyle: FontStyleMode;
   lyricOffsetMs: number;
@@ -28,6 +29,7 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   isInterlude,
   beatRef,
   clockRef,
+  spectrumRef,
   showBall,
   fontStyle,
   lyricOffsetMs,
@@ -35,8 +37,32 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   void showBall;
   void lyricOffsetMs;
   const topProgressFillRef = useRef<HTMLDivElement | null>(null);
+  const eqBarRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const [fontsLoadedTick, setFontsLoadedTick] = useState(0);
   const [viewportScale, setViewportScale] = useState(getViewportScale);
+
+  // Drive live 16-bar mirrored FFT spectrum ribbon during instrumental interludes (0 cost during lyrics)
+  useEffect(() => {
+    if (!isInterlude) return;
+    let rafId = 0;
+    const step = () => {
+      rafId = requestAnimationFrame(step);
+      if (document.hidden) return;
+      const spec = spectrumRef.current;
+      if (!spec || spec.length < 64) return;
+      for (let i = 0; i < 16; i++) {
+        const bar = eqBarRefs.current[i];
+        if (!bar) continue;
+        // Symmetrical mirror: center bars = bass/low-mid, edges = treble
+        const distFromCenter = Math.abs(i - 7.5) / 7.5;
+        const binIdx = Math.min(63, Math.floor(distFromCenter * 44));
+        const amp = spec[binIdx] / 255;
+        bar.style.transform = `scaleY(${(0.14 + amp * 1.35).toFixed(3)})`;
+      }
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [isInterlude, spectrumRef]);
 
   // Re-measure word widths once web fonts (Manrope / Playfair / Rubik) finish loading
   useEffect(() => {
@@ -214,10 +240,21 @@ export const KineticTypeStage = memo(function KineticTypeStage({
         </div>
       )}
 
-      {/* Signature Intro / Interlude Pulsing Circle (like 00:00 of the reference video) OR Continuous 2D Camera */}
+      {/* Signature Intro / Interlude Pulsing Circle + Live 16-Bar FFT Ribbon OR Continuous 2D Camera */}
       {isInterlude ? (
         <div className="ae-intro-circle-wrap" aria-hidden="true">
           <span className="ae-intro-circle" />
+          <div className="ae-interlude-eq">
+            {Array.from({ length: 16 }).map((_, idx) => (
+              <span
+                key={idx}
+                ref={(el) => {
+                  eqBarRefs.current[idx] = el;
+                }}
+                className="ae-interlude-bar"
+              />
+            ))}
+          </div>
         </div>
       ) : (
         <div className="ae-camera-viewport" key={`line-${lineKey}`}>

@@ -5,6 +5,7 @@ export type BiomeId =
   | 'pixel-tunnel'
   | 'pixel-kaleido'
   | 'pixel-echo'
+  | 'pixel-scope'
   | 'kinetic-type';
 
 export type ResolvedBiome = Exclude<BiomeId, 'auto'>;
@@ -51,4 +52,5 @@ export interface AudioMetrics {
   bpm: number;
   beatCount: number;
   audioSource: AudioSourceType;
+  spectrum: Uint8Array;
 }

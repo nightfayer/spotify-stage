@@ -13,6 +13,8 @@ export class LiveAudioAnalyzer {
   private lastSampleTimeSec: number | null = null;
   private lastBeatTimeSec = -10;
   private beatIntervals: number[] = [];
+  private spectrumFloat = new Float32Array(64);
+  private spectrumBins = new Uint8Array(64);
   private smoothed: AudioMetrics = {
     bass: 0,
     mid: 0,
@@ -22,6 +24,7 @@ export class LiveAudioAnalyzer {
     bpm: 0,
     beatCount: 0,
     audioSource: 'none',
+    spectrum: this.spectrumBins,
   };
 
   setGain(nextGain: number): void {
@@ -210,6 +213,20 @@ export class LiveAudioAnalyzer {
       const decayedBeat = this.smoothed.beat * Math.exp(-10.5 * dt);
       this.smoothed.beat = beatImpulse > decayedBeat ? beatImpulse : decayedBeat;
 
+      // Pack 64 log-curved FFT bins with asymmetric smoothing into reusable Uint8Array (0 GC)
+      const maxBin = Math.min(len - 1, 96);
+      const specAttack = 1 - Math.exp(-42 * dt);
+      const specRelease = 1 - Math.exp(-11 * dt);
+      for (let i = 0; i < 64; i++) {
+        const t = i / 63;
+        const idx = Math.min(maxBin, Math.floor(Math.pow(t, 1.45) * maxBin));
+        const target = Math.min(1, (bins[idx] / 255) * autoScale);
+        const cur = this.spectrumFloat[i];
+        const next = cur + (target - cur) * (target > cur ? specAttack : specRelease);
+        this.spectrumFloat[i] = next;
+        this.spectrumBins[i] = Math.min(255, Math.max(0, Math.round(next * 255)));
+      }
+
       // Auto-BPM tracker from beat onset intervals (median-filtered, 70–180 BPM range)
       if (beatImpulse > 0.52 && timeSec - this.lastBeatTimeSec >= 0.28) {
         const interval = timeSec - this.lastBeatTimeSec;
@@ -246,6 +263,22 @@ export class LiveAudioAnalyzer {
     this.smoothed.treble += (drift3 - this.smoothed.treble) * idleAlpha;
     this.smoothed.beat *= Math.exp(-6.5 * dt);
     this.smoothed.energy = (this.smoothed.bass + this.smoothed.mid + this.smoothed.treble) / 3;
+
+    // Musical procedural spectrum fallback when live mic/tab audio is not connected
+    const specIdleAlpha = 1 - Math.exp(-8.0 * dt);
+    for (let i = 0; i < 64; i++) {
+      const f = i / 63;
+      const bassEnv = Math.exp(-f * 4.2) * (0.42 + 0.28 * Math.sin(timeSec * 3.1 + f * 3.0));
+      const midEnv =
+        Math.exp(-Math.pow((f - 0.36) * 4.5, 2)) * (0.34 + 0.24 * Math.sin(timeSec * 2.3 - f * 9.0));
+      const highEnv =
+        Math.exp(-Math.pow((f - 0.72) * 5.0, 2)) * (0.2 + 0.16 * Math.cos(timeSec * 4.1 + f * 14.0));
+      const ripple = 0.08 * Math.sin(timeSec * 5.2 + i * 0.48) * (1 - f * 0.5);
+      const target = Math.min(1, Math.max(0.02, (bassEnv + midEnv + highEnv + ripple) * active));
+      const next = this.spectrumFloat[i] + (target - this.spectrumFloat[i]) * specIdleAlpha;
+      this.spectrumFloat[i] = next;
+      this.spectrumBins[i] = Math.min(255, Math.max(0, Math.round(next * 255)));
+    }
 
     return this.smoothed;
   }

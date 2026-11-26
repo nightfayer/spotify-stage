@@ -62,12 +62,14 @@ const BIOME_LABELS: { id: BiomeId; label: string }[] = [
   { id: 'pixel-tunnel', label: 'Tunnel' },
   { id: 'pixel-kaleido', label: 'Kaleido' },
   { id: 'pixel-echo', label: 'Echo' },
+  { id: 'pixel-scope', label: 'Scope' },
   { id: 'kinetic-type', label: 'Type' },
 ];
 
 const VJ_ROTATION: ResolvedBiome[] = [
   'pixel-horizon',
   'pixel-tunnel',
+  'pixel-scope',
   'pixel-kaleido',
   'pixel-echo',
   'pixel-plasma',
@@ -161,6 +163,7 @@ export function App() {
   const timecodeRef = useRef<HTMLSpanElement | null>(null);
   const vuMeterRef = useRef<HTMLDivElement | null>(null);
   const bpmTagRef = useRef<HTMLSpanElement | null>(null);
+  const spectrumRef = useRef<Uint8Array | null>(null);
   const lastBeatSwitchCountRef = useRef<number>(0);
   const playbackClockRef = useRef<PlaybackClock>({
     progressMs: DEMO_TRACKS[0].progressMs,
@@ -791,6 +794,8 @@ export function App() {
       } else if (e.code === 'Digit5' || e.key === '5') {
         setBiomeChoice('pixel-echo');
       } else if (e.code === 'Digit6' || e.key === '6') {
+        setBiomeChoice('pixel-scope');
+      } else if (e.code === 'Digit7' || e.key === '7') {
         setBiomeChoice('kinetic-type');
       } else if (e.code === 'KeyM') {
         void toggleMic();
@@ -888,7 +893,9 @@ export function App() {
       bpm: number;
       beatCount: number;
       audioSource: AudioSourceType;
+      spectrum: Uint8Array;
     }) => {
+      spectrumRef.current = metrics.spectrum;
       const intensity = Math.min(1, metrics.beat * 0.75 + metrics.bass * 0.45);
       const isKick = metrics.audioSource !== 'none' && metrics.beat > 0.78 ? 1 : 0;
       const prev = lastMetricsRef.current;
@@ -1010,6 +1017,7 @@ export function App() {
           isInterlude={isInterlude}
           beatRef={lyricsOverlayRef}
           clockRef={playbackClockRef}
+          spectrumRef={spectrumRef}
           showBall={bouncingBall}
           fontStyle={fontStyle}
           lyricOffsetMs={lyricOffsetMs}
@@ -1471,7 +1479,7 @@ export function App() {
             </div>
             <div className="shortcuts-grid">
               <div><kbd>0</kbd><span>Режим Auto VJ (в такт биту)</span></div>
-              <div><kbd>1</kbd>–<kbd>6</kbd><span>Выбор сцены (Ocean … Type)</span></div>
+              <div><kbd>1</kbd>–<kbd>7</kbd><span>Выбор сцены (Ocean … Scope, Type)</span></div>
               <div><kbd>Space</kbd><span>Пауза / воспроизведение</span></div>
               <div><kbd>A</kbd><span>Захват звука вкладки / системы</span></div>
               <div><kbd>M</kbd><span>Микрофон</span></div>
