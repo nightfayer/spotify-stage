@@ -148,6 +148,27 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   const isPhraseEndPullBack = placedWords.length >= 3 && activeWordIdx === placedWords.length - 1;
   const isShortHook = placedWords.length <= 2;
 
+  // Trigger razor-sharp AE diagonal shutter wipe whenever Dark <-> Color inversion flips
+  const prevInvertedRef = useRef(isInverted);
+  const [wipeTick, setWipeTick] = useState(0);
+  useEffect(() => {
+    if (prevInvertedRef.current !== isInverted) {
+      prevInvertedRef.current = isInverted;
+      setWipeTick((n) => n + 1);
+    }
+  }, [isInverted]);
+
+  // Pick at most ONE solid non-hero accent word per line for the editorial Highlight Marker Sweep
+  const highlightWordIdx = useMemo(() => {
+    if (placedWords.length < 3) return -1;
+    const punctIdx = placedWords.findIndex(
+      (w) => !w.isHero && w.variant === 'solid' && /[!?]$/.test(w.word)
+    );
+    if (punctIdx >= 0) return punctIdx;
+    const candidate = placedWords.find((w) => !w.isHero && w.variant === 'solid' && w.wordIndex > 0);
+    return candidate ? candidate.wordIndex : -1;
+  }, [placedWords]);
+
   const cameraStyle = useMemo(() => {
     const baseZoom = focusWord ? focusWord.zoom * viewportScale : viewportScale;
     const finalZoom = isPhraseEndPullBack ? baseZoom * 0.88 : baseZoom;
@@ -158,6 +179,8 @@ export const KineticTypeStage = memo(function KineticTypeStage({
       '--cam-zoom': Number(finalZoom.toFixed(3)),
     } as React.CSSProperties;
   }, [focusWord, isPhraseEndPullBack, viewportScale]);
+
+  const lineNumLabel = String(lineIndex + 1).padStart(2, '0');
 
   return (
     <div
@@ -176,6 +199,20 @@ export const KineticTypeStage = memo(function KineticTypeStage({
       <div className="reels-top-progress" aria-hidden="true">
         <div ref={topProgressFillRef} className="reels-top-progress-fill" />
       </div>
+
+      {/* AE Diagonal Shutter Wipe Cut on Dark <-> Color inversion flips */}
+      {wipeTick > 0 && <div key={`wipe-${wipeTick}`} className="ae-color-wipe" aria-hidden="true" />}
+
+      {/* Subtle Editorial Viewfinder Crosshairs & Parallax Giant Line Number */}
+      {!isInterlude && (
+        <div className="ae-parallax-backdrop" style={cameraStyle} aria-hidden="true">
+          <span className="ae-watermark-num">{lineNumLabel}</span>
+          <span className="ae-viewfinder-mark top-left">+</span>
+          <span className="ae-viewfinder-mark top-right">LN // {lineNumLabel}</span>
+          <span className="ae-viewfinder-mark bottom-left">+</span>
+          <span className="ae-viewfinder-mark bottom-right">+</span>
+        </div>
+      )}
 
       {/* Signature Intro / Interlude Pulsing Circle (like 00:00 of the reference video) OR Continuous 2D Camera */}
       {isInterlude ? (
@@ -199,6 +236,9 @@ export const KineticTypeStage = memo(function KineticTypeStage({
               const isActive = item.wordIndex === activeWordIdx;
               const age = activeWordIdx - item.wordIndex;
               const hasPunctuation = /[!?]$/.test(item.word);
+              const hasHighlight = item.wordIndex === highlightWordIdx;
+              const useLetterSplit = item.isHero && item.word.length >= 2 && item.word.length <= 14;
+              const showEchoClones = isActive && (item.isHero || isShortHook);
               const stateCls = isActive
                 ? 'is-active'
                 : age === 1
@@ -209,7 +249,7 @@ export const KineticTypeStage = memo(function KineticTypeStage({
               return (
                 <div
                   key={item.id}
-                  className={`ae-world-word variant-${item.variant} ${stateCls} ${hasPunctuation ? 'has-accent-mark' : ''}`}
+                  className={`ae-world-word variant-${item.variant} ${stateCls} ${hasPunctuation ? 'has-accent-mark' : ''} ${hasHighlight ? 'has-highlight-sweep' : ''} ${useLetterSplit ? 'has-letter-split' : ''}`}
                   style={
                     {
                       '--wx': `${item.x}px`,
@@ -222,7 +262,30 @@ export const KineticTypeStage = memo(function KineticTypeStage({
                   {isShortHook && isActive && (
                     <span className="ae-hook-ring" key={`ring-${item.id}`} aria-hidden="true" />
                   )}
-                  <span className="ae-world-word-text">{item.word}</span>
+                  {showEchoClones && (
+                    <>
+                      <span className="ae-word-clone clone-up" key={`cu-${item.id}`} aria-hidden="true">
+                        {item.word}
+                      </span>
+                      <span className="ae-word-clone clone-down" key={`cd-${item.id}`} aria-hidden="true">
+                        {item.word}
+                      </span>
+                    </>
+                  )}
+                  <span className="ae-world-word-text">
+                    {useLetterSplit
+                      ? Array.from(item.word).map((ch, idx) => (
+                          <span key={idx} className="ae-letter-mask">
+                            <span
+                              className="ae-letter"
+                              style={{ '--li': idx } as React.CSSProperties}
+                            >
+                              {ch}
+                            </span>
+                          </span>
+                        ))
+                      : item.word}
+                  </span>
                 </div>
               );
             })}

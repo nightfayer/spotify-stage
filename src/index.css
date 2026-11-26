@@ -2180,6 +2180,232 @@ body,
   }
 }
 
+/* ==========================================================================
+   Type Scene Pro AE Wow-Effects (100% GPU-composited for locked 60 FPS)
+   1. Diagonal Shutter Wipe Cut  2. Parallax Giant Watermark + Viewfinder
+   3. Staggered Letter Reveal    4. Outline Echo Clones   5. Highlight Sweep
+   ========================================================================== */
+
+/* 1. Diagonal Shutter Wipe Cut on Dark <-> Color inversion */
+.ae-color-wipe {
+  position: fixed;
+  inset: -10% -18%;
+  z-index: 6;
+  pointer-events: none;
+  background: var(--ae-ink-strong);
+  opacity: 0.92;
+  will-change: transform;
+  animation: aeShutterWipe 0.24s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+@keyframes aeShutterWipe {
+  0% {
+    transform: translate3d(-105%, 0, 0) skewX(-9deg);
+  }
+  100% {
+    transform: translate3d(105%, 0, 0) skewX(-9deg);
+  }
+}
+
+/* 2. Parallax Giant Watermark & Swiss Editorial Viewfinder Marks */
+.ae-parallax-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  contain: layout style;
+}
+
+.ae-watermark-num {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-family: 'Manrope', 'Helvetica Neue', sans-serif;
+  font-size: clamp(16rem, 36vw, 32rem);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+  color: transparent;
+  -webkit-text-stroke: 2px var(--ae-ink);
+  opacity: 0.09;
+  user-select: none;
+  will-change: transform;
+  transform:
+    translate3d(
+      calc(-50% + var(--cam-x, 0) * -0.14px),
+      calc(-50% + var(--cam-y, 0) * -0.14px),
+      0
+    )
+    rotate(calc(var(--cam-rot, 0) * -0.1deg));
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ae-viewfinder-mark {
+  position: fixed;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--ae-ink);
+  opacity: 0.26;
+  user-select: none;
+}
+
+.ae-viewfinder-mark.top-left {
+  top: 22px;
+  left: 24px;
+}
+
+.ae-viewfinder-mark.top-right {
+  top: 22px;
+  right: 24px;
+}
+
+.ae-viewfinder-mark.bottom-left {
+  bottom: 22px;
+  left: 24px;
+}
+
+.ae-viewfinder-mark.bottom-right {
+  bottom: 22px;
+  right: 24px;
+}
+
+/* 3. Staggered Kinetic Letter Mask Reveal on Hero Words */
+.ae-letter-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  padding: 0.04em 0 0.08em;
+  margin: -0.04em 0 -0.08em;
+}
+
+.ae-letter {
+  display: inline-block;
+  will-change: transform;
+}
+
+.ae-world-word.has-letter-split.is-active .ae-letter {
+  animation: aeLetterRise 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--li, 0) * 18ms);
+}
+
+@keyframes aeLetterRise {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 112%, 0) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* 4. Outline Echo Clones bursting behind Hero / Hook Words */
+.ae-word-clone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: inherit;
+  font-size: var(--wsize, 80px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.06;
+  padding: 0.12em 0.1em 0.18em 0.1em;
+  text-transform: lowercase;
+  white-space: nowrap;
+  color: transparent;
+  -webkit-text-stroke: 2px var(--ae-ink-strong);
+  pointer-events: none;
+  z-index: -1;
+  will-change: transform, opacity;
+}
+
+.ae-world-word.variant-serif .ae-word-clone {
+  font-family: 'Playfair Display', 'Instrument Serif', Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.ae-world-word.variant-hero .ae-word-clone {
+  font-family: 'Rubik', 'Manrope', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.ae-word-clone.clone-up {
+  animation: aeCloneBurstUp 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ae-word-clone.clone-down {
+  animation: aeCloneBurstDown 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes aeCloneBurstUp {
+  0% {
+    opacity: 0.52;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -46%, 0) scale(1.07);
+  }
+}
+
+@keyframes aeCloneBurstDown {
+  0% {
+    opacity: 0.52;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 46%, 0) scale(1.07);
+  }
+}
+
+/* 5. Editorial Highlight Marker Sweep behind Accent Word */
+.ae-world-word.has-highlight-sweep .ae-world-word-text {
+  position: relative;
+  z-index: 1;
+  padding: 0.12em 0.24em 0.18em 0.24em;
+}
+
+.ae-world-word.has-highlight-sweep .ae-world-word-text::before {
+  content: '';
+  position: absolute;
+  inset: 0.08em 0.04em 0.1em 0.04em;
+  background: var(--ae-ink-strong);
+  border-radius: 6px;
+  z-index: -1;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.ae-world-word.has-highlight-sweep.is-active .ae-world-word-text,
+.ae-world-word.has-highlight-sweep.is-spoken .ae-world-word-text,
+.ae-world-word.has-highlight-sweep.is-spoken-far .ae-world-word-text {
+  color: var(--ae-bg);
+}
+
+.ae-world-word.has-highlight-sweep.is-active .ae-world-word-text::before {
+  animation: aeHighlightSweep 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ae-world-word.has-highlight-sweep.is-spoken .ae-world-word-text::before,
+.ae-world-word.has-highlight-sweep.is-spoken-far .ae-world-word-text::before {
+  transform: scaleX(1);
+}
+
+@keyframes aeHighlightSweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* Upgraded Kinetic Overlay over WebGL 8-bit scenes (3D parallax + Hero contrast + Beat Kick) */
 .lyrics-overlay {
   perspective: 900px;
