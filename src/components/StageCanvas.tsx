@@ -13,6 +13,7 @@ interface StageCanvasProps {
   clockRef: React.RefObject<PlaybackClock>;
   getAudioMetrics: (timeSec: number, isPlaying: boolean) => AudioMetrics;
   onMetricsFrame?: (metrics: AudioMetrics) => void;
+  occluded?: boolean;
 }
 
 const FULLSCREEN_VERTEX = `
@@ -626,22 +627,24 @@ function resizeTarget(gl: WebGLRenderingContext, target: GlTarget, width: number
 
 export const StageCanvas = memo(
   forwardRef<StageCanvasHandle, StageCanvasProps>(function StageCanvas(
-    { biome, track, clockRef, getAudioMetrics, onMetricsFrame },
+    { biome, track, clockRef, getAudioMetrics, onMetricsFrame, occluded = false },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const renderOnceRef = useRef<(() => void) | null>(null);
+    const renderOnceRef = useRef<((forceDraw?: boolean) => void) | null>(null);
     const triggerShockRef = useRef<((nx?: number, ny?: number) => void) | null>(null);
     const biomeRef = useRef<ResolvedBiome>(biome);
     const trackRef = useRef<TrackState>(track);
     const metricsFnRef = useRef(getAudioMetrics);
     const onMetricsFrameRef = useRef(onMetricsFrame);
+    const occludedRef = useRef(occluded);
 
     biomeRef.current = biome;
     trackRef.current = track;
     metricsFnRef.current = getAudioMetrics;
     onMetricsFrameRef.current = onMetricsFrame;
+    occludedRef.current = occluded;
 
     useImperativeHandle(ref, () => ({
       triggerShockwave(nx = 0.5, ny = 0.5) {
@@ -651,7 +654,7 @@ export const StageCanvas = memo(
         const glCanvas = canvasRef.current;
         if (!glCanvas) return;
 
-        renderOnceRef.current?.();
+        renderOnceRef.current?.(true);
 
         const out = document.createElement('canvas');
         out.width = glCanvas.width;
@@ -763,7 +766,10 @@ export const StageCanvas = memo(
       const targetSecondary: [number, number, number] = [...colSecondary];
       const targetAccent: [number, number, number] = [...colAccent];
       const targetBg: [number, number, number] = [...colBg];
-      let cachedPaletteKey = '';
+      let lastPalP = '';
+      let lastPalS = '';
+      let lastPalA = '';
+      let lastPalB = '';
 
       let currentWidth = width;
       let currentHeight = height;
@@ -848,7 +854,7 @@ export const StageCanvas = memo(
         if (u.uProgress) gl.uniform1f(u.uProgress, smoothProgress);
       };
 
-      const renderFrame = () => {
+      const renderFrame = (forceDraw = false) => {
         const nowMs = performance.now();
         const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastPerfMs) * 0.001));
         lastPerfMs = nowMs;
@@ -888,9 +894,16 @@ export const StageCanvas = memo(
         flowTime += dt * speedScale;
 
         const pal = activeTrack.palette;
-        const palKey = `${pal.primary}${pal.secondary}${pal.accent}${pal.background}`;
-        if (palKey !== cachedPaletteKey) {
-          cachedPaletteKey = palKey;
+        if (
+          pal.primary !== lastPalP ||
+          pal.secondary !== lastPalS ||
+          pal.accent !== lastPalA ||
+          pal.background !== lastPalB
+        ) {
+          lastPalP = pal.primary;
+          lastPalS = pal.secondary;
+          lastPalA = pal.accent;
+          lastPalB = pal.background;
           parseHexToRgb(pal.primary, targetPrimary);
           parseHexToRgb(pal.secondary, targetSecondary);
           parseHexToRgb(pal.accent, targetAccent);
@@ -912,6 +925,13 @@ export const StageCanvas = memo(
           Math.max(0, liveProgressMs / Math.max(1, activeTrack.durationMs))
         );
         smoothProgress += (targetProgress - smoothProgress) * (1 - Math.exp(-4.0 * dt));
+
+        const needsComposite = transitionProgress < 0.999 || shockAge < 0.999;
+
+        // Skip GPU fragment shader work completely when opaque Type stage covers the canvas
+        if (!forceDraw && occludedRef.current && !needsComposite) {
+          return;
+        }
 
         const stepEcho = () => {
           gl.useProgram(echoProg.program);
@@ -954,7 +974,6 @@ export const StageCanvas = memo(
           stepEcho();
         }
 
-        const needsComposite = transitionProgress < 0.999 || shockAge < 0.999;
         if (needsComposite) {
           if (transitionProgress < 0.999) {
             renderBiome(prevBiome, rtPrev);

@@ -75,8 +75,10 @@ export function BouncingBall({
     });
 
     let rafId = 0;
+    let lastLiveMs = -1;
     const step = () => {
       rafId = requestAnimationFrame(step);
+      if (document.hidden) return;
       const pts = pointsRef.current;
       if (pts.length === 0) return;
 
@@ -85,6 +87,8 @@ export function BouncingBall({
         (clock.isPlaying
           ? clock.progressMs + (performance.now() - clock.updatedAt)
           : clock.progressMs) + lyricOffsetMs;
+      if (!clock.isPlaying && liveMs === lastLiveMs) return;
+      lastLiveMs = liveMs;
 
       const span = Math.max(800, lineDurationMs * 0.82);
       const elapsed = Math.max(0, liveMs - lineStartMs);

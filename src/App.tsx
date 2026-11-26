@@ -174,6 +174,17 @@ export function App() {
   const lastVjSwitchRef = useRef<number>(Date.now());
   const [hudVisible, setHudVisible] = useState(true);
   const hudVisibleRef = useRef(true);
+  const hudActiveRef = useRef(true);
+  const lastMetricsRef = useRef({
+    beat: -1,
+    energy: -1,
+    kick: -1,
+    hudBeat: -1,
+    bass: -1,
+    mid: -1,
+    treble: -1,
+    vu: -1,
+  });
   const [hudPinned, setHudPinned] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
@@ -511,6 +522,7 @@ export function App() {
   useEffect(() => {
     let rafId = 0;
     let lastSecond = -1;
+    let lastProgressStr = '';
     let lastLyricKey = '';
     let lastInterlude = false;
     let lastShowUpNext = false;
@@ -535,10 +547,16 @@ export function App() {
         }
       }
 
-      // 1. GPU-composited progress bar (no React re-render, no layout reflow)
-      const fill = progressFillRef.current;
-      if (fill) {
-        fill.style.transform = `scaleX(${Math.min(1, Math.max(0, liveMs / durationMs)).toFixed(4)})`;
+      // 1. GPU-composited progress bar (skip DOM write when HUD is hidden or unchanged)
+      if (hudActiveRef.current) {
+        const fill = progressFillRef.current;
+        if (fill) {
+          const ratioStr = Math.min(1, Math.max(0, liveMs / durationMs)).toFixed(4);
+          if (ratioStr !== lastProgressStr) {
+            lastProgressStr = ratioStr;
+            fill.style.transform = `scaleX(${ratioStr})`;
+          }
+        }
       }
 
       // 2. Timecode DOM update only once per second + Up Next banner window (last 14s)
@@ -873,29 +891,61 @@ export function App() {
     }) => {
       const intensity = Math.min(1, metrics.beat * 0.75 + metrics.bass * 0.45);
       const isKick = metrics.audioSource !== 'none' && metrics.beat > 0.78 ? 1 : 0;
+      const prev = lastMetricsRef.current;
+      const EPS = 0.015;
+
       const el = lyricsOverlayRef.current;
       if (el) {
-        el.style.setProperty('--beat', intensity.toFixed(3));
-        el.style.setProperty('--energy', metrics.energy.toFixed(3));
-        el.style.setProperty('--kick', String(isKick));
-      }
-      const hud = hudLayerRef.current;
-      if (hud) {
-        hud.style.setProperty('--beat', intensity.toFixed(3));
-        hud.style.setProperty('--bass', metrics.bass.toFixed(3));
-        hud.style.setProperty('--mid', metrics.mid.toFixed(3));
-        hud.style.setProperty('--treble', metrics.treble.toFixed(3));
+        if (Math.abs(intensity - prev.beat) >= EPS) {
+          prev.beat = intensity;
+          el.style.setProperty('--beat', intensity.toFixed(2));
+        }
+        if (Math.abs(metrics.energy - prev.energy) >= EPS) {
+          prev.energy = metrics.energy;
+          el.style.setProperty('--energy', metrics.energy.toFixed(2));
+        }
+        if (isKick !== prev.kick) {
+          prev.kick = isKick;
+          el.style.setProperty('--kick', String(isKick));
+        }
       }
 
-      const vu = vuMeterRef.current;
-      if (vu) {
-        vu.style.transform = `scaleX(${Math.min(1, Math.max(0.03, metrics.energy)).toFixed(3)})`;
-      }
-      const bpmEl = bpmTagRef.current;
-      if (bpmEl) {
-        const nextText = metrics.bpm > 0 ? `${metrics.bpm} BPM` : '— BPM';
-        if (bpmEl.textContent !== nextText) {
-          bpmEl.textContent = nextText;
+      // Skip all HUD DOM writes when HUD is auto-hidden
+      if (hudActiveRef.current) {
+        const hud = hudLayerRef.current;
+        if (hud) {
+          if (Math.abs(intensity - prev.hudBeat) >= EPS) {
+            prev.hudBeat = intensity;
+            hud.style.setProperty('--beat', intensity.toFixed(2));
+          }
+          if (Math.abs(metrics.bass - prev.bass) >= EPS) {
+            prev.bass = metrics.bass;
+            hud.style.setProperty('--bass', metrics.bass.toFixed(2));
+          }
+          if (Math.abs(metrics.mid - prev.mid) >= EPS) {
+            prev.mid = metrics.mid;
+            hud.style.setProperty('--mid', metrics.mid.toFixed(2));
+          }
+          if (Math.abs(metrics.treble - prev.treble) >= EPS) {
+            prev.treble = metrics.treble;
+            hud.style.setProperty('--treble', metrics.treble.toFixed(2));
+          }
+        }
+
+        const vu = vuMeterRef.current;
+        if (vu) {
+          const vuVal = Math.min(1, Math.max(0.03, metrics.energy));
+          if (Math.abs(vuVal - prev.vu) >= EPS) {
+            prev.vu = vuVal;
+            vu.style.transform = `scaleX(${vuVal.toFixed(2)})`;
+          }
+        }
+        const bpmEl = bpmTagRef.current;
+        if (bpmEl) {
+          const nextText = metrics.bpm > 0 ? `${metrics.bpm} BPM` : '— BPM';
+          if (bpmEl.textContent !== nextText) {
+            bpmEl.textContent = nextText;
+          }
         }
       }
 
@@ -918,6 +968,8 @@ export function App() {
   );
 
   const hideCursor = !hudVisible && !hudPinned && !modalOpen && !tuneOpen;
+  hudActiveRef.current = hudVisible || hudPinned || tuneOpen;
+  const isStageOccluded = resolvedBiome === 'kinetic-type' && !titleCardTrack && lyricMode === 'kinetic';
 
   return (
     <main className={`stage-root ${hideCursor ? 'is-idle-cursor' : ''} ${oledDimmed ? 'is-oled-dim' : ''}`}>
@@ -928,6 +980,7 @@ export function App() {
         clockRef={playbackClockRef}
         getAudioMetrics={getMetrics}
         onMetricsFrame={handleMetricsFrame}
+        occluded={isStageOccluded}
       />
 
       {/* Arcade Stage Title Card on Track Change */}

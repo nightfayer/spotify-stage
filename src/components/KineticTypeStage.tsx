@@ -55,17 +55,22 @@ export const KineticTypeStage = memo(function KineticTypeStage({
   // Smooth 60+ FPS GPU-composited top progress bar driven directly from clockRef
   useEffect(() => {
     let rafId = 0;
+    let lastRatioStr = '';
     const duration = Math.max(1, track.durationMs);
     const tick = () => {
       rafId = requestAnimationFrame(tick);
+      if (document.hidden) return;
       const fill = topProgressFillRef.current;
       if (!fill) return;
       const clock = clockRef.current;
       const liveMs = clock.isPlaying
         ? clock.progressMs + (performance.now() - clock.updatedAt)
         : clock.progressMs;
-      const ratio = Math.min(1, Math.max(0, liveMs / duration));
-      fill.style.transform = `scaleX(${ratio.toFixed(4)})`;
+      const ratioStr = Math.min(1, Math.max(0, liveMs / duration)).toFixed(4);
+      if (ratioStr !== lastRatioStr) {
+        lastRatioStr = ratioStr;
+        fill.style.transform = `scaleX(${ratioStr})`;
+      }
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
