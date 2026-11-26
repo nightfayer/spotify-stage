@@ -170,11 +170,11 @@ export function buildPlainLyrics(plainText: string, durationMs: number): LyricLi
   }));
 }
 
-async function fetchWithTimeout(
+async function fetchJsonWithTimeout<T>(
   url: string,
   signal?: AbortSignal,
-  timeoutMs = 5000
-): Promise<Response> {
+  timeoutMs = 4000
+): Promise<T | null> {
   const controller = new AbortController();
   const onParentAbort = () => controller.abort();
   if (signal) {
@@ -186,7 +186,12 @@ async function fetchWithTimeout(
   }
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    // Keep timeout active while streaming the JSON body so stalled responses abort cleanly
+    return (await res.json()) as T;
+  } catch {
+    return null;
   } finally {
     globalThis.clearTimeout(timer);
     signal?.removeEventListener('abort', onParentAbort);
@@ -197,32 +202,33 @@ async function queryLrcGet(
   params: URLSearchParams,
   signal?: AbortSignal
 ): Promise<LrcLibItem | null> {
-  try {
-    const res = await fetchWithTimeout(
-      `https://lrclib.net/api/get?${params.toString()}`,
-      signal,
-      5000
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as LrcLibItem;
-  } catch {
-    return null;
-  }
+  return fetchJsonWithTimeout<LrcLibItem>(
+    `https://lrclib.net/api/get?${params.toString()}`,
+    signal,
+    4000
+  );
 }
 
 async function queryLrcSearch(params: URLSearchParams, signal?: AbortSignal): Promise<LrcLibItem[]> {
-  try {
-    const res = await fetchWithTimeout(
-      `https://lrclib.net/api/search?${params.toString()}`,
-      signal,
-      5000
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data) ? (data as LrcLibItem[]) : [];
-  } catch {
-    return [];
+  const data = await fetchJsonWithTimeout<unknown>(
+    `https://lrclib.net/api/search?${params.toString()}`,
+    signal,
+    3500
+  );
+  return Array.isArray(data) ? (data as LrcLibItem[]) : [];
+}
+
+async function queryLyricsOvh(
+  artist: string,
+  title: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
+  const data = await fetchJsonWithTimeout<{ lyrics?: string }>(url, signal, 4000);
+  if (typeof data?.lyrics === 'string' && data.lyrics.trim().length > 0) {
+    return data.lyrics;
   }
+  return null;
 }
 
 export async function fetchSyncedLyrics(
@@ -315,6 +321,16 @@ export async function fetchSyncedLyrics(
       const synthetic = buildPlainLyrics(fallbackPlain, durationMs);
       lyricsCache.set(cacheKey, synthetic);
       return synthetic;
+    }
+
+    // 4. Secondary provider fallback (lyrics.ovh) when LRCLIB has no match or /api/search stalls
+    if (!signal?.aborted) {
+      const ovhPlain = await queryLyricsOvh(cleanArtist, cleanedTitle, signal);
+      if (ovhPlain) {
+        const synthetic = buildPlainLyrics(ovhPlain, durationMs);
+        lyricsCache.set(cacheKey, synthetic);
+        return synthetic;
+      }
     }
 
     return [];
