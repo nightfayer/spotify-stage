@@ -178,6 +178,7 @@ export function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [titleCardTrack, setTitleCardTrack] = useState<TrackState | null>(null);
+  const [coverErrorId, setCoverErrorId] = useState<string | null>(null);
 
   const lastTrackIdRef = useRef<string>(DEMO_TRACKS[0].id);
   const prevTitleTrackIdRef = useRef<string>(DEMO_TRACKS[0].id);
@@ -1121,7 +1122,16 @@ export function App() {
       {showUpNext && upNextTrack && !titleCardTrack && (
         <aside className="up-next-card" aria-label="Следующий трек">
           {upNextTrack.coverUrl && (
-            <img src={upNextTrack.coverUrl} alt="" className="up-next-cover" />
+            <img
+              src={upNextTrack.coverUrl}
+              alt=""
+              className="up-next-cover"
+              crossOrigin="anonymous"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
           )}
           <div className="up-next-meta">
             <span className="up-next-kicker">ДАЛЕЕ</span>
@@ -1141,8 +1151,23 @@ export function App() {
       >
         {/* Bottom-left: Now Playing */}
         <section className="now-playing-card">
-          {track.coverUrl && (
-            <img src={track.coverUrl} alt={track.album} className="cover-thumb" />
+          {track.coverUrl && coverErrorId !== track.id ? (
+            <img
+              src={track.coverUrl}
+              alt={track.album}
+              className="cover-thumb"
+              crossOrigin="anonymous"
+              referrerPolicy="no-referrer"
+              onError={() => setCoverErrorId(track.id)}
+            />
+          ) : (
+            <div
+              className="cover-thumb cover-fallback"
+              style={{
+                background: `linear-gradient(135deg, ${effectiveTrack.palette.primary}, ${effectiveTrack.palette.secondary})`,
+              }}
+              aria-hidden="true"
+            />
           )}
           <div className="track-meta">
             <div className="track-badge-row">
