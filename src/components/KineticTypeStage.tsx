@@ -274,7 +274,22 @@ export const KineticTypeStage = memo(function KineticTypeStage({
               const age = activeWordIdx - item.wordIndex;
               const hasPunctuation = /[!?]$/.test(item.word);
               const hasHighlight = item.wordIndex === highlightWordIdx;
-              const useLetterSplit = item.isHero && item.word.length >= 2 && item.word.length <= 14;
+              // Selectively trigger expressive letter-by-letter reveals on standout moments:
+              // short 1-2 word hooks, accent punctuation words, or hero words on alternating lines
+              const isLetterMoment =
+                isShortHook || hasPunctuation || (item.isHero && lineIndex % 2 === 0);
+              const useLetterSplit =
+                isLetterMoment && item.word.length >= 2 && item.word.length <= 14;
+              const letterStyleIdx = (lineIndex + item.wordIndex) % 4;
+              const letterStyleCls = useLetterSplit
+                ? letterStyleIdx === 0
+                  ? 'letter-fx-wave'
+                  : letterStyleIdx === 1
+                    ? 'letter-fx-elastic'
+                    : letterStyleIdx === 2
+                      ? 'letter-fx-flip'
+                      : 'letter-fx-type'
+                : '';
               const showEchoClones = isActive && (item.isHero || isShortHook);
               const stateCls = isActive
                 ? 'is-active'
@@ -286,7 +301,7 @@ export const KineticTypeStage = memo(function KineticTypeStage({
               return (
                 <div
                   key={item.id}
-                  className={`ae-world-word variant-${item.variant} ${stateCls} ${hasPunctuation ? 'has-accent-mark' : ''} ${hasHighlight ? 'has-highlight-sweep' : ''} ${useLetterSplit ? 'has-letter-split' : ''}`}
+                  className={`ae-world-word variant-${item.variant} ${stateCls} ${hasPunctuation ? 'has-accent-mark' : ''} ${hasHighlight ? 'has-highlight-sweep' : ''} ${useLetterSplit ? `has-letter-split ${letterStyleCls}` : ''}`}
                   style={
                     {
                       '--wx': `${item.x}px`,

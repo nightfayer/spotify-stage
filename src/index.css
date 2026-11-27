@@ -2293,33 +2293,123 @@ body,
   right: 24px;
 }
 
-/* 3. Staggered Kinetic Letter Mask Reveal on Hero Words */
+/* 3. Expressive Letter-by-Letter Kinetic Reveals (4 AE Styles, 100% GPU-composited) */
+.ae-world-word.has-letter-split.is-active .ae-world-word-text {
+  /* Let per-letter choreography take center stage without conflicting parent squash/pop */
+  animation: none;
+}
+
 .ae-letter-mask {
   display: inline-block;
   overflow: hidden;
   vertical-align: bottom;
-  padding: 0.04em 0 0.08em;
-  margin: -0.04em 0 -0.08em;
+  padding: 0.14em 0.03em 0.16em;
+  margin: -0.14em -0.03em -0.16em;
+}
+
+.ae-world-word.letter-fx-elastic .ae-letter-mask,
+.ae-world-word.letter-fx-flip .ae-letter-mask {
+  overflow: visible;
+  perspective: 460px;
 }
 
 .ae-letter {
   display: inline-block;
-  will-change: transform;
+  will-change: transform, opacity;
+  transform-origin: 50% 72%;
 }
 
-.ae-world-word.has-letter-split.is-active .ae-letter {
-  animation: aeLetterRise 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
-  animation-delay: calc(var(--li, 0) * 18ms);
+/* Style A: Kinetic Mask Wave (letters swing up from mask with subtle tilt & overshoot) */
+.ae-world-word.letter-fx-wave.is-active .ae-letter {
+  animation: aeLetterWave 0.38s cubic-bezier(0.22, 1.25, 0.36, 1) both;
+  animation-delay: calc(var(--li, 0) * 34ms);
 }
 
-@keyframes aeLetterRise {
+@keyframes aeLetterWave {
   0% {
     opacity: 0;
-    transform: translate3d(0, 112%, 0) scale(0.92);
+    transform: translate3d(0, 118%, 0) rotate(9deg) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+}
+
+/* Style B: Elastic Pop (letters spring out one by one with juicy overshoot) */
+.ae-world-word.letter-fx-elastic.is-active .ae-letter {
+  animation: aeLetterElastic 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: calc(var(--li, 0) * 36ms);
+}
+
+@keyframes aeLetterElastic {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 26px, 0) scale(0.28);
+  }
+  65% {
+    opacity: 1;
+    transform: translate3d(0, -4px, 0) scale(1.12);
   }
   100% {
     opacity: 1;
     transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Style C: 3D Split-Flap Flip (letters hinge open along X-axis like Apple Keynote titles) */
+.ae-world-word.letter-fx-flip.is-active .ae-letter {
+  transform-origin: 50% 50%;
+  animation: aeLetterFlip 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--li, 0) * 38ms);
+}
+
+@keyframes aeLetterFlip {
+  0% {
+    opacity: 0;
+    transform: rotateX(-86deg) translate3d(0, 16px, 0) scale(0.88);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateX(0deg) translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Style D: Typewriter Snap (crisp sequential letter-by-letter type-on with blinking caret) */
+.ae-world-word.letter-fx-type.is-active .ae-letter {
+  animation: aeLetterType 0.14s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--li, 0) * 44ms);
+}
+
+.ae-world-word.letter-fx-type:not(.has-accent-mark).is-active .ae-world-word-text::after {
+  content: '';
+  display: inline-block;
+  width: 0.08em;
+  height: 0.78em;
+  margin-left: 0.08em;
+  vertical-align: -0.06em;
+  background: var(--ae-ink-strong);
+  border-radius: 2px;
+  animation: aeTypeCaret 0.55s steps(2, end) infinite;
+}
+
+@keyframes aeLetterType {
+  0% {
+    opacity: 0;
+    transform: translate3d(-8px, 0, 0) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes aeTypeCaret {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 
